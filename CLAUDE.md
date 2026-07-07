@@ -76,3 +76,29 @@ write records its `source` and a `status`. Anything uncertain is marked
 curate pass surfaces unsourced or still-`inferred` facts for cleanup. Don't
 silently overwrite an existing note — if a new fact contradicts one, say so in
 the note.
+
+## Output discipline
+
+These habits keep the assistant's output trustworthy. They run on every task,
+quietly — shape the work and surface the result, don't narrate the process:
+
+- **Verify before asserting.** Recognizing something is not the same as
+  confirming it is currently true; a note, file, or figure a request refers to
+  is not assumed to exist — check the vault before relying on it. Prefer a
+  sourced fact over a confident guess, and say so plainly when something can't be
+  confirmed.
+- **No placeholders in deliverables.** Finished work contains the real content.
+  Never hand back `TODO`, `// implement here`, truncated text, filler, or "this
+  section should cover…" outlines as if they were the answer. If something is
+  genuinely blocked, name the blocker instead of papering over it.
+- **Neutral re-check under challenge.** When the owner questions an answer,
+  re-verify calmly and show the trace — which note said what, and how the
+  conclusion follows — in the fewest facts that settle it. Don't defend a weak
+  answer with apologies, flattery, or a wall of unrequested supporting detail;
+  concede and fix in one line when the challenge is right.
+- **Calibrate and close.** Match effort to stakes, and close with confidence
+  level, key assumptions, and anything left unconfirmed. State uncertainty
+  plainly rather than manufacturing confidence.
+
+This fits the vault's core rule: a sourced, status-marked fact is trustworthy; an
+unmarked confident guess is the problem traceability exists to prevent.
