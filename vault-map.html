@@ -69,6 +69,11 @@
     border-radius:4px}
   #hint{position:fixed; bottom:14px; right:16px; color:var(--dim); font-size:11px;
     pointer-events:none}
+  #tip{position:fixed; display:none; pointer-events:none; z-index:20;
+    max-width:min(420px,calc(100vw - 28px)); background:var(--panel);
+    border:1px solid var(--line); border-radius:8px; padding:7px 9px;
+    color:var(--text); font-size:11px; box-shadow:0 10px 30px rgba(0,0,0,.28)}
+  #tip .path{color:var(--dim); margin-top:2px; word-break:break-all}
 </style>
 </head>
 <body>
@@ -84,24 +89,25 @@
 </div>
 <div id="hud">
   <label>Search</label>
-  <input id="search" placeholder="Search files… (Enter spotlights)">
-  <label>View</label>
+  <input id="search" placeholder="Search files...">
+  <label>Spacing</label>
   <div class="seg" id="viewSeg">
-    <button data-v="departments" class="on">Departments</button>
-    <button data-v="folders">Folders</button>
+    <button data-v="departments" class="on">Compact</button>
+    <button data-v="folders">Spread</button>
   </div>
   <label class="chk"><input type="checkbox" id="names"> File names</label>
   <label class="chk"><input type="checkbox" id="links" checked> Filaments</label>
   <label class="chk"><input type="checkbox" id="censusToggle" checked> All workspace files</label>
   <div id="legend"></div>
 </div>
-<div id="detail"><span class="x" onclick="hideDetail()">✕</span><div id="dbody"></div></div>
+<div id="detail"><span class="x" onclick="closeDetail()">✕</span><div id="dbody"></div></div>
 <div id="empty"><div>
   <h2 style="color:var(--text);margin-bottom:8px">No index found</h2>
   <p>This map reads <code>brain-index.js</code>, which is generated next to it.<br><br>
   Run <code>python brain.py --index</code> in this folder, then reload.</p>
 </div></div>
-<div id="hint">click a node: spotlight its filaments · click background: back · drag: pan · wheel: zoom</div>
+<div id="hint">hover: file name · click a file: select · click a folder: zoom · drag: pan · wheel: zoom</div>
+<div id="tip"></div>
 <script src="brain-index.js"></script>
 <script>
 "use strict";
@@ -136,7 +142,7 @@ const INSTRUCTION_NAMES=new Set(["claude.md","agents.md"]);
 
 /* ---------- data ---------- */
 let viewMode = "departments", showCensus = true;
-let nodes=[], groups=[], links=[], ringNodes=[];
+let nodes=[], groups=[], links=[], ringNodes=[], folderNodes=[];
 let mode="overview";           // overview | spot
 let spot=null;                 // {center, items:Map(target->rel), edges:[...]}
 const secByFile = {};
@@ -169,53 +175,566 @@ function cosine(a,b){
   return dot/(Math.sqrt(na*nb)||1);
 }
 
-function groupKey(f){
-  const parts=f.path.split("/");
-  if(viewMode==="departments") return parts[0];
-  return parts.length>2 ? parts[0]+"/"+parts[1] : parts[0];
-}
-
 /* ---------- overview build ---------- */
 const GOLDEN = Math.PI*(3-Math.sqrt(5));
-let pathToNode={};
-function buildGraph(){
-  const visible = IX.files.filter(f=> showCensus || f.indexed!==false);
-  const keys=[...new Set(visible.map(groupKey))].sort();
-  const byKey={};
-  visible.forEach(f=>{ (byKey[groupKey(f)]=byKey[groupKey(f)]||[]).push(f); });
-  groups = keys.map((k,i)=>{
-    const n=byKey[k].length;
-    return {key:k, color:PAL[i%PAL.length], n,
-            r: 26 + 4.6*Math.sqrt(n), x:0, y:0};
-  });
-  const placed=[];
-  [...groups].sort((a,b)=>b.n-a.n).forEach((g,gi)=>{
-    if(gi===0){ g.x=0; g.y=0; placed.push(g); return; }
-    let a=gi*2.2, rad=placed[0].r+g.r+70;
-    for(let t=0;t<2000;t++){
-      const x=Math.cos(a)*rad, y=Math.sin(a)*rad;
-      if(placed.every(p=>Math.hypot(x-p.x,y-p.y) > p.r+g.r+46)){
-        g.x=x; g.y=y; placed.push(g); return;
-      }
-      a+=0.35; rad+=2.2;
+let pathToNode={}, pathToFolder={}, treeRoot=null, revealStart=performance.now();
+let selectedFolder=null, selectedFile=null, focusedRing=null, layoutAnim=null, spotReturnView=null;
+
+function fileName(path){ return path.split("/").pop(); }
+function folderPathOf(path){
+  const i=path.lastIndexOf("/");
+  return i>=0 ? path.slice(0,i) : "";
+}
+function parentFolderPath(path){
+  if(!path) return null;
+  const i=path.lastIndexOf("/");
+  return i>=0 ? path.slice(0,i) : "";
+}
+function topKey(path){
+  const parts=path.split("/");
+  return parts.length>1 ? parts[0] : "(root)";
+}
+function folderName(path){ return path ? path.split("/").pop() : IX.root_name; }
+function isInstructionFile(f){ return INSTRUCTION_NAMES.has(fileName(f.path).toLowerCase()); }
+function isFolderInstruction(node){ return node && node.f && isInstructionFile(node.f); }
+function currentFolderGap(){ return viewMode==="folders" ? 260 : 145; }
+
+function ensureFolder(path){
+  if(pathToFolder[path]) return pathToFolder[path];
+  const parentPath=parentFolderPath(path);
+  const parent=parentPath===null ? null : ensureFolder(parentPath);
+  const folder={
+    kind:"folder", path, name:folderName(path), parent,
+    children:new Map(), files:[], depth:path? path.split("/").length : 0,
+    count:0, indexedCount:0, bytes:0, color:ACCENT,
+    x:0, y:0, r:8, start:0, end:Math.PI*2, angle:0
+  };
+  pathToFolder[path]=folder;
+  if(parent) parent.children.set(folder.name, folder);
+  return folder;
+}
+
+function buildTree(visible){
+  pathToFolder={};
+  treeRoot=ensureFolder("");
+  visible.forEach(f=>ensureFolder(folderPathOf(f.path)).files.push(f));
+  function aggregate(folder){
+    folder.count=folder.files.length;
+    folder.indexedCount=folder.files.filter(f=>f.indexed!==false).length;
+    folder.bytes=folder.files.reduce((s,f)=>s+(f.bytes||0),0);
+    for(const child of folder.children.values()){
+      aggregate(child);
+      folder.count+=child.count;
+      folder.indexedCount+=child.indexedCount;
+      folder.bytes+=child.bytes;
     }
-    g.x=Math.cos(a)*rad; g.y=Math.sin(a)*rad; placed.push(g);
+  }
+  aggregate(treeRoot);
+}
+
+function topColor(path){
+  const key=topKey(path);
+  const idx=groups.findIndex(g=>g.key===key);
+  return idx>=0 ? groups[idx].color : PAL[0];
+}
+
+function assignFolderColors(){
+  const tops=[...treeRoot.children.values()].sort((a,b)=>b.count-a.count || a.name.localeCompare(b.name));
+  groups=tops.map((folder,i)=>({
+    key:folder.path, color:PAL[i%PAL.length], n:folder.count, folder,
+    x:0, y:0, r:80
+  }));
+  groups.forEach(g=>g.folder.color=g.color);
+  function inherit(folder){
+    for(const child of folder.children.values()){
+      child.color=folder.color || topColor(child.path);
+      inherit(child);
+    }
+  }
+  tops.forEach(inherit);
+  treeRoot.color=ACCENT;
+}
+
+function layoutTree(){
+  folderNodes=[];
+  nodes=[];
+  pathToNode={};
+  const folderGap=currentFolderGap();
+  const topFolders=[...treeRoot.children.values()].sort((a,b)=>b.count-a.count || a.name.localeCompare(b.name));
+  const total=Math.max(1, topFolders.reduce((s,f)=>s+f.count,0));
+  treeRoot.x=0; treeRoot.y=0; treeRoot.r=18; treeRoot.angle=-Math.PI/2;
+  treeRoot.start=-Math.PI/2; treeRoot.end=treeRoot.start+Math.PI*2;
+  folderNodes.push(treeRoot);
+  let cursor=treeRoot.start;
+  topFolders.forEach(folder=>{
+    const span=Math.max(0.12, Math.PI*2*(folder.count/total));
+    layoutFolder(folder, cursor, cursor+span, folderGap);
+    cursor+=span;
   });
-  const gByKey=Object.fromEntries(groups.map(g=>[g.key,g]));
-  nodes=[]; pathToNode={};
-  for(const k of keys){
-    const g=gByKey[k];
-    const list=byKey[k].slice().sort((a,b)=>
-      (b.indexed===false?0:1)-(a.indexed===false?0:1) || b.bytes-a.bytes);
-    list.forEach((f,i)=>{
-      const rr=g.r*0.92*Math.sqrt((i+0.6)/list.length), th=i*GOLDEN;
-      const node={ f, g,
-        x:g.x+Math.cos(th)*rr, y:g.y+Math.sin(th)*rr,
-        r: f.indexed===false? 1.7 : 2.6+Math.min(6, Math.log2(1+(f.bytes||500)/1500)),
-        name: f.path.split("/").pop() };
-      nodes.push(node); pathToNode[f.path]=node;
+  layoutRootFiles(folderGap);
+  groups.forEach(g=>{
+    const b=folderBounds(g.folder);
+    g.x=(b.minX+b.maxX)/2; g.y=(b.minY+b.maxY)/2;
+    g.r=Math.max(80, Math.hypot(b.maxX-b.minX,b.maxY-b.minY)/2+55);
+  });
+  rememberBaseLayout();
+}
+
+function layoutFolder(folder,start,end,folderGap){
+  folder.start=start; folder.end=end;
+  folder.angle=(start+end)/2;
+  const depthRadius=Math.max(1,folder.depth)*folderGap;
+  folder.x=Math.cos(folder.angle)*depthRadius;
+  folder.y=Math.sin(folder.angle)*depthRadius;
+  folder.r=Math.max(8, Math.min(34, 7+Math.sqrt(folder.count)*0.42));
+  folderNodes.push(folder);
+  layoutDirectFiles(folder, folderGap);
+
+  const children=[...folder.children.values()]
+    .sort((a,b)=>b.count-a.count || a.name.localeCompare(b.name));
+  if(!children.length) return;
+  const childTotal=children.reduce((s,c)=>s+c.count,0);
+  const pad=viewMode==="folders"
+    ? Math.min((end-start)*0.22, children.length*0.022)
+    : Math.min((end-start)*0.12, children.length*0.012);
+  const usable=Math.max(0.04, (end-start)-pad);
+  let cur=start+pad/2;
+  children.forEach(child=>{
+    const minSpan=Math.min(0.06, usable/children.length);
+    const span=Math.max(minSpan, usable*(child.count/Math.max(1,childTotal)));
+    layoutFolder(child, cur, Math.min(end-pad/2, cur+span), folderGap);
+    cur+=span;
+  });
+}
+
+function layoutRootFiles(folderGap){
+  const files=treeRoot.files.slice().sort((a,b)=>
+    (isInstructionFile(b)?1:0)-(isInstructionFile(a)?1:0) || b.bytes-a.bytes);
+  files.forEach((f,i)=>{
+    const a=-Math.PI/2 + i*GOLDEN;
+    const dist=42+folderGap*(viewMode==="folders" ? 0.43 : 0.25)*Math.sqrt(i+1);
+    addFileNode(f, treeRoot, Math.cos(a)*dist, Math.sin(a)*dist);
+  });
+}
+
+function layoutDirectFiles(folder, folderGap){
+  const files=folder.files.slice().sort((a,b)=>
+    (isInstructionFile(b)?1:0)-(isInstructionFile(a)?1:0) ||
+    (b.indexed===false?0:1)-(a.indexed===false?0:1) || b.bytes-a.bytes);
+  const instructions=files.filter(isInstructionFile);
+  const filler=files.filter(f=>!isInstructionFile(f));
+  const span=Math.max(0.02, folder.end-folder.start);
+  const base=Math.max(1,folder.depth)*folderGap;
+  const spread=viewMode==="folders";
+
+  instructions.forEach((f,i)=>{
+    const offset=(i-(instructions.length-1)/2)*Math.min(0.08, span*0.18);
+    const a=folder.angle+offset;
+    const dist=base+(spread?62:34)+i*(spread?28:18);
+    addFileNode(f, folder, Math.cos(a)*dist, Math.sin(a)*dist, true);
+  });
+
+  const band=Math.min(spread?190:95,
+    (spread?44:28)+Math.sqrt(Math.max(1,filler.length))*(spread?4.4:2.4));
+  filler.forEach((f,i)=>{
+    const pct=((i*0.61803398875)%1);
+    const a=folder.start+span*((spread?0.04:0.08)+pct*(spread?0.92:0.84));
+    const dist=base+(spread?86:54)+band*Math.sqrt((i+0.5)/Math.max(1,filler.length));
+    addFileNode(f, folder, Math.cos(a)*dist, Math.sin(a)*dist);
+  });
+}
+
+function addFileNode(f, folder, x, y, instruction=false){
+  const node={ f, g:{key:topKey(f.path), color:folder.color || topColor(f.path)}, folder,
+    x, y, baseX:x, baseY:y, tx:x, ty:y,
+    r: f.indexed===false? 1.7 : 2.6+Math.min(6, Math.log2(1+(f.bytes||500)/1500)),
+    name: fileName(f.path),
+    instruction: instruction || isInstructionFile(f),
+    depth: folder.depth+1 };
+  nodes.push(node); pathToNode[f.path]=node;
+}
+
+function rememberBaseLayout(){
+  folderNodes.forEach(f=>{ f.baseX=f.x; f.baseY=f.y; f.tx=f.x; f.ty=f.y; });
+  nodes.forEach(n=>{ n.baseX=n.x; n.baseY=n.y; n.tx=n.x; n.ty=n.y; });
+}
+
+function setBackVisible(visible,label="Back to overview"){
+  const back=document.getElementById("back");
+  back.textContent=label;
+  back.style.display=visible ? "block" : "none";
+}
+
+function startLayoutAnimation(duration=1250){
+  const prep=(item,key)=>{
+    item.sx=item.x; item.sy=item.y;
+    const dx=(item.tx??item.x)-item.x, dy=(item.ty??item.y)-item.y;
+    const dist=Math.hypot(dx,dy);
+    item.motionDelay=Math.max(0, deterministicJitter(key+":delay",180));
+    item.motionDuration=duration*(0.86 + Math.abs(deterministicJitter(key+":dur",0.34)));
+    item.motionCurve=dist ? deterministicJitter(key+":curve",Math.min(42,dist*0.16)) : 0;
+  };
+  folderNodes.forEach(f=>prep(f,f.path||"root"));
+  nodes.forEach(n=>prep(n,n.f.path));
+  layoutAnim={start:performance.now(), duration};
+  requestDraw();
+}
+
+function clearFolderFocus(){
+  hideDetail();
+  selected=null;
+  selectedFile=null;
+  focusedRing=null;
+  resetFocusLayout();
+  fitOverview(true,true);
+}
+
+function clearFileFocus(){
+  hideDetail();
+  selected=null;
+  selectedFile=null;
+  setBackVisible(!!selectedFolder || !!focusedRing);
+  if(selectedFolder){
+    showFolderDetail(selectedFolder);
+    zoomFolderCamera(selectedFolder);
+  } else if(focusedRing) {
+    requestDraw();
+  } else {
+    fitOverview();
+  }
+  requestDraw();
+}
+
+function clearRingFocus(){
+  hideDetail();
+  selected=null;
+  selectedFile=null;
+  selectedFolder=null;
+  focusedRing=null;
+  resetFocusLayout();
+  fitOverview(true,true);
+  setBackVisible(false);
+  requestDraw();
+}
+
+function resetToOverview(){
+  mode="overview"; spot=null; spotReturnView=null;
+  selectedFolder=null; selectedFile=null; focusedRing=null; selected=null;
+  document.getElementById("edgeKey").style.display="none";
+  hideDetail();
+  resetFocusLayout();
+  fitOverview(true,true);
+  setBackVisible(false);
+  requestDraw();
+}
+
+function leaveSpotState(){
+  mode="overview";
+  spot=null;
+  spotReturnView=null;
+  document.getElementById("edgeKey").style.display="none";
+}
+
+function isNearFocusedFolder(px,py){
+  if(!selectedFolder || selectedFolder._sx===undefined) return false;
+  const d=Math.hypot(px-selectedFolder._sx, py-selectedFolder._sy);
+  return d < Math.max(54, selectedFolder.r*cam.s+28);
+}
+
+function isNearSpotCenter(px,py){
+  if(mode!=="spot" || !spot || !spot.center) return false;
+  const c=spot.center;
+  const [sx,sy]=toScreen(c.x,c.y);
+  return Math.hypot(px-sx,py-sy) < 42;
+}
+
+function isNearFocusedFile(px,py){
+  if(!selectedFile || selectedFile._sx===undefined) return false;
+  return Math.hypot(px-selectedFile._sx, py-selectedFile._sy) < Math.max(36, selectedFile.r*cam.s+18);
+}
+
+function captureReturnView(){
+  return {
+    cam:{x:cam.x,y:cam.y,s:cam.s},
+    camT:{x:camT.x,y:camT.y,s:camT.s},
+    selectedFolder,
+    selectedFile,
+    focusedRing
+  };
+}
+
+function restoreReturnView(){
+  const ret=spotReturnView;
+  spotReturnView=null;
+  if(!ret){ fitOverview(); return; }
+  selectedFolder=ret.selectedFolder || null;
+  selectedFile=ret.selectedFile || null;
+  focusedRing=ret.focusedRing || null;
+  Object.assign(camT,ret.camT);
+  if(selectedFolder) showFolderDetail(selectedFolder);
+  else if(selectedFile) showDetail(selectedFile);
+  else hideDetail();
+}
+
+function resetFocusLayout(duration=950){
+  selectedFolder=null;
+  selectedFile=null;
+  folderNodes.forEach(f=>{ f.tx=f.baseX; f.ty=f.baseY; });
+  nodes.forEach(n=>{ n.tx=n.baseX; n.ty=n.baseY; });
+  groups.forEach(g=>{
+    const b=folderBounds(g.folder,true);
+    g.x=(b.minX+b.maxX)/2; g.y=(b.minY+b.maxY)/2;
+    g.r=Math.max(80, Math.hypot(b.maxX-b.minX,b.maxY-b.minY)/2+55);
+  });
+  startLayoutAnimation(duration);
+  setBackVisible(mode==="spot");
+}
+
+function inFolder(folder,item){
+  if(!folder) return false;
+  if(item===folder) return true;
+  const path=item.f ? item.f.path : item.path;
+  if(!folder.path) return true;
+  return path===folder.path || path.startsWith(folder.path+"/");
+}
+
+function depthFrom(folder,item){
+  const path=item.f ? folderPathOf(item.f.path) : item.path;
+  if(!folder.path) return path ? path.split("/").length : 0;
+  if(path===folder.path) return 0;
+  return path.slice(folder.path.length+1).split("/").filter(Boolean).length;
+}
+
+function deterministicJitter(text,scale=1){
+  let h=2166136261;
+  for(let i=0;i<text.length;i++) h=(h^text.charCodeAt(i))*16777619;
+  return (((h>>>0)%1000)/1000-0.5)*scale;
+}
+
+function targetRadius(item){
+  if(item.kind==="folder"){
+    if(!item.parent) return 76;
+    return Math.max(52, item.r+42);
+  }
+  if(item.f) return item.instruction ? 46 : Math.max(20,item.r+14);
+  return 26;
+}
+
+function settleTargetCollisions(items, lockedItem=null, iterations=34){
+  const active=items.filter(Boolean);
+  const pad=8, cellSize=140;
+  active.forEach(item=>{
+    item._anchorX=item.tx??item.x;
+    item._anchorY=item.ty??item.y;
+  });
+  for(let pass=0; pass<iterations; pass++){
+    const grid=new Map();
+    active.forEach((item,i)=>{
+      if(item.tx===undefined || item.ty===undefined) return;
+      const gx=Math.floor(item.tx/cellSize), gy=Math.floor(item.ty/cellSize);
+      const key=gx+","+gy;
+      if(!grid.has(key)) grid.set(key,[]);
+      grid.get(key).push(i);
+    });
+    for(const [key,idxs] of grid){
+      const [gx,gy]=key.split(",").map(Number);
+      for(let ox=-1; ox<=1; ox++) for(let oy=-1; oy<=1; oy++){
+        const other=grid.get((gx+ox)+","+(gy+oy));
+        if(!other) continue;
+        for(const ai of idxs) for(const bi of other){
+          if(bi<=ai) continue;
+          const a=active[ai], b=active[bi];
+          const dx=b.tx-a.tx, dy=b.ty-a.ty;
+          let d=Math.hypot(dx,dy);
+          const min=targetRadius(a)+targetRadius(b)+pad;
+          if(d>=min) continue;
+          if(d<0.001){
+            const n=deterministicJitter((a.path||a.f?.path||"a")+":"+(b.path||b.f?.path||"b"),Math.PI*2);
+            d=1;
+            b.tx+=Math.cos(n); b.ty+=Math.sin(n);
+          }
+          const push=(min-d)*0.54;
+          const nx=(b.tx-a.tx)/d, ny=(b.ty-a.ty)/d;
+          const aLocked=a===lockedItem, bLocked=b===lockedItem;
+          const aw=aLocked?0:(bLocked?1:0.5), bw=bLocked?0:(aLocked?1:0.5);
+          a.tx-=nx*push*aw; a.ty-=ny*push*aw;
+          b.tx+=nx*push*bw; b.ty+=ny*push*bw;
+        }
+      }
+    }
+    active.forEach(item=>{
+      if(item===lockedItem) return;
+      item.tx+=(item._anchorX-item.tx)*0.025;
+      item.ty+=(item._anchorY-item.ty)*0.025;
     });
   }
+  active.forEach(item=>{ delete item._anchorX; delete item._anchorY; });
+}
+
+function applyFolderFocus(folder){
+  selectedFolder=folder;
+  selectedFile=null;
+  selected=null;
+  const ax=folder.baseX, ay=folder.baseY;
+  let directFiles=nodes.filter(n=>n.folder===folder)
+    .sort((a,b)=>(b.instruction?1:0)-(a.instruction?1:0) || b.f.bytes-a.f.bytes);
+  const childFolders=[...folder.children.values()]
+    .sort((a,b)=>b.count-a.count || a.name.localeCompare(b.name));
+  const descendantFolders=folderNodes.filter(f=>f!==folder && inFolder(folder,f));
+  const descendantFiles=nodes.filter(n=>inFolder(folder,n) && n.folder!==folder);
+  if(!directFiles.length && !childFolders.length && descendantFiles.length){
+    directFiles=descendantFiles.slice()
+      .sort((a,b)=>depthFrom(folder,a)-depthFrom(folder,b) || b.f.bytes-a.f.bytes)
+      .slice(0,80);
+  }
+
+  folder.tx=ax; folder.ty=ay;
+  directFiles.forEach((n,i)=>{
+    const ring=Math.floor(i/10);
+    const slot=i%10;
+    const angle=-Math.PI/2 + slot*(Math.PI*2/Math.min(10,directFiles.length||1)) +
+      ring*0.18 + deterministicJitter(n.f.path,0.08);
+    const dist=(n.instruction?92:124) + ring*58;
+    n.tx=ax+Math.cos(angle)*dist;
+    n.ty=ay+Math.sin(angle)*dist;
+  });
+
+  const childAngles=new Map();
+  const spokeCount=Math.max(1,childFolders.length);
+  const spokeRadius=Math.max(300, 150+spokeCount*13+Math.sqrt(folder.count)*3.5);
+  childFolders.forEach((child,i)=>{
+    const angle=-Math.PI/2 + i*(Math.PI*2/spokeCount);
+    childAngles.set(child,angle);
+    child.tx=ax+Math.cos(angle)*spokeRadius;
+    child.ty=ay+Math.sin(angle)*spokeRadius;
+  });
+
+  childFolders.forEach(child=>{
+    const angle=childAngles.get(child);
+    const ux=Math.cos(angle), uy=Math.sin(angle);
+    const vx=-uy, vy=ux;
+    const laneArc=(Math.PI*2*Math.max(360,spokeRadius+120))/spokeCount;
+    const laneWidth=Math.max(54, Math.min(140,laneArc*0.68));
+    const laneStep=Math.max(52, Math.min(70,laneWidth*0.48));
+    const cols=Math.max(1, Math.min(3, Math.floor(laneWidth/laneStep)+1));
+    const branchFolders=descendantFolders
+      .filter(f=>f.parent && f!==child && inFolder(child,f))
+      .sort((a,b)=>depthFrom(child,a)-depthFrom(child,b) || b.count-a.count || a.name.localeCompare(b.name));
+    const branchFiles=nodes
+      .filter(n=>inFolder(child,n))
+      .sort((a,b)=>depthFrom(child,a)-depthFrom(child,b) ||
+        (b.instruction?1:0)-(a.instruction?1:0) || b.f.bytes-a.f.bytes);
+    const branchItems=[...branchFolders, ...branchFiles];
+    branchItems.forEach((item,k)=>{
+      const row=Math.floor(k/cols);
+      const col=k%cols;
+      const radial=spokeRadius+118+row*64+(item.kind==="folder"?0:14);
+      const lateral=(col-(cols-1)/2)*laneStep+
+        deterministicJitter((item.path||item.f.path)+":lane",Math.min(14,laneStep*0.22));
+      item.tx=ax+ux*radial+vx*lateral;
+      item.ty=ay+uy*radial+vy*lateral;
+    });
+  });
+
+  const focusItems=[
+    folder,
+    ...descendantFolders,
+    ...nodes.filter(n=>inFolder(folder,n))
+  ];
+  settleTargetCollisions(focusItems, folder, 58);
+
+  const fb=focusCameraBounds(folder);
+  const fcx=(fb.minX+fb.maxX)/2, fcy=(fb.minY+fb.maxY)/2;
+  const focusRadius=Math.max(220, Math.hypot(fb.maxX-fb.minX,fb.maxY-fb.minY)/2+210);
+  const pushAway=(item,radius,key)=>{
+    const dx=item.baseX-fcx, dy=item.baseY-fcy;
+    const d=Math.hypot(dx,dy)||1;
+    const minD=focusRadius+radius+120;
+    const soft=240*Math.exp(-d/760);
+    const td=Math.max(d+soft,minD);
+    const nx=dx/d, ny=dy/d;
+    const tangent=deterministicJitter(key+":tangent",52);
+    item.tx=fcx+nx*td-ny*tangent;
+    item.ty=fcy+ny*td+nx*tangent;
+  };
+  folderNodes.forEach(f=>{
+    if(inFolder(folder,f)) return;
+    pushAway(f, Math.max(32,f.r), f.path||"root");
+  });
+  nodes.forEach(n=>{
+    if(inFolder(folder,n)) return;
+    pushAway(n, Math.max(18,n.r), n.f.path);
+  });
+  settleTargetCollisions([
+    ...folderNodes.filter(f=>!inFolder(folder,f)),
+    ...nodes.filter(n=>!inFolder(folder,n))
+  ], null, 20);
+
+  groups.forEach(g=>{
+    const b=folderBounds(g.folder,true);
+    g.x=(b.minX+b.maxX)/2; g.y=(b.minY+b.maxY)/2;
+    g.r=Math.max(80, Math.hypot(b.maxX-b.minX,b.maxY-b.minY)/2+55);
+  });
+  startLayoutAnimation(1350);
+  setBackVisible(true,"Back to overview");
+}
+
+function focusCameraBounds(folder){
+  const include=[];
+  const add=item=>{ if(item && !include.includes(item)) include.push(item); };
+  add(folder);
+  for(const child of folder.children.values()) add(child);
+  nodes.filter(n=>n.folder===folder)
+    .sort((a,b)=>(b.instruction?1:0)-(a.instruction?1:0) || b.f.bytes-a.f.bytes)
+    .slice(0,90)
+    .forEach(add);
+  if(include.length===1){
+    folderNodes.filter(f=>f!==folder && inFolder(folder,f))
+      .sort((a,b)=>depthFrom(folder,a)-depthFrom(folder,b) || b.count-a.count)
+      .slice(0,18)
+      .forEach(add);
+    nodes.filter(n=>inFolder(folder,n))
+      .sort((a,b)=>depthFrom(folder,a)-depthFrom(folder,b) || b.f.bytes-a.f.bytes)
+      .slice(0,90)
+      .forEach(add);
+  }
+  let minX=Infinity, maxX=-Infinity, minY=Infinity, maxY=-Infinity;
+  include.forEach(item=>{
+    const x=item.tx??item.x, y=item.ty??item.y, r=Math.max(12,item.r||6);
+    minX=Math.min(minX,x-r); maxX=Math.max(maxX,x+r);
+    minY=Math.min(minY,y-r); maxY=Math.max(maxY,y+r);
+  });
+  if(!isFinite(minX)) return folderBounds(folder,true);
+  return {minX,maxX,minY,maxY};
+}
+
+function folderBounds(folder,useTargets=false){
+  const prefix=folder.path ? folder.path+"/" : "";
+  const fx=useTargets ? folder.tx : folder.x, fy=useTargets ? folder.ty : folder.y;
+  let minX=fx, maxX=fx, minY=fy, maxY=fy;
+  for(const f of folderNodes){
+    if(f===folder || (!folder.path && f.path) || (prefix && f.path.startsWith(prefix))){
+      const x=useTargets ? f.tx : f.x, y=useTargets ? f.ty : f.y;
+      minX=Math.min(minX,x-f.r); maxX=Math.max(maxX,x+f.r);
+      minY=Math.min(minY,y-f.r); maxY=Math.max(maxY,y+f.r);
+    }
+  }
+  for(const n of nodes){
+    if(!folder.path || n.f.path.startsWith(prefix)){
+      const x=useTargets ? n.tx : n.x, y=useTargets ? n.ty : n.y;
+      minX=Math.min(minX,x-n.r); maxX=Math.max(maxX,x+n.r);
+      minY=Math.min(minY,y-n.r); maxY=Math.max(maxY,y+n.r);
+    }
+  }
+  return {minX,maxX,minY,maxY};
+}
+
+function buildGraph(){
+  const visible = IX.files.filter(f=> showCensus || f.indexed!==false);
+  selectedFolder=null; selectedFile=null; focusedRing=null; spotReturnView=null; selected=null;
+  buildTree(visible);
+  assignFolderColors();
+  layoutTree();
   links=[];
   const idxNodes=nodes.map((n,i)=>[n,i]).filter(([n])=>n.f.indexed!==false);
   if(idxNodes.length<=900){
@@ -233,7 +752,8 @@ function buildGraph(){
   }
   ringNodes=[];
   let maxR=260;
-  groups.forEach(g=>maxR=Math.max(maxR, Math.hypot(g.x,g.y)+g.r));
+  folderNodes.forEach(f=>maxR=Math.max(maxR, Math.hypot(f.x,f.y)+f.r+70));
+  nodes.forEach(n=>maxR=Math.max(maxR, Math.hypot(n.x,n.y)+n.r+30));
   const arms=IX.arms||{};
   const mk=(list,kind,color,radius,shape)=> (list||[]).forEach((it,i,arr)=>{
     ringNodes.push({kind,color,shape,radius,
@@ -258,7 +778,8 @@ function buildGraph(){
   mk(arms.applications,"application",APP,maxR+350,"hex");
   ringNodes.forEach(r=>{ r.x=Math.cos(r.angle)*r.radius; r.y=Math.sin(r.angle)*r.radius; });
   buildLegend(arms);
-  fitAll(false);
+  revealStart=performance.now();
+  fitOverview(false);
 }
 
 function buildLegend(arms){
@@ -277,6 +798,8 @@ function buildLegend(arms){
   extra.forEach(([n,c,cnt])=>{ if(cnt){
     const row=document.createElement("div"); row.className="row";
     row.innerHTML=`<span class="dot" style="background:${c}"></span>${n} · ${cnt}`;
+    const kind=n==="skills" ? "skill" : n==="routines" ? "routine" : "application";
+    row.onclick=()=>focusRingGroup(kind,n);
     el.appendChild(row); }});
   {
     const agents=arms.agents||[];
@@ -284,12 +807,14 @@ function buildLegend(arms){
     tools.forEach((t,i)=>{
       const row=document.createElement("div"); row.className="row";
       row.innerHTML=`<span class="dot" style="background:${AGENT_COLORS[i%AGENT_COLORS.length]}"></span>agents · ${t} · ${agents.filter(a=>a.tool===t).length}`;
+      row.onclick=()=>focusRingGroup("agent","agents · "+t,t);
       el.appendChild(row);
     });
     const gaps=(arms.agent_gaps||[]).length;
     if(gaps){
       const row=document.createElement("div"); row.className="row";
       row.innerHTML=`<span class="dot" style="background:${ACCENT}"></span>agent parity gaps · ${gaps}`;
+      row.onclick=()=>focusRingGroup("agent","agent parity gaps");
       el.appendChild(row);
     }
   }
@@ -356,45 +881,215 @@ function connectionsOf(center){
   return items.slice(0,60);
 }
 function enterSpot(center){
+  if(mode!=="spot") spotReturnView=captureReturnView();
+  selectedFile=null;
   const items=connectionsOf(center);
+  if(center.f && (!items.length || center.f.indexed===false)){
+    spotReturnView=null;
+    focusFileNode(center);
+    return;
+  }
+  if(!items.length){
+    spotReturnView=null;
+    mode="overview"; spot=null;
+    document.getElementById("edgeKey").style.display="none";
+    setBackVisible(false);
+    if(center.f) showDetail(center); else showRingDetail(center);
+    const x=center.x || 0, y=center.y || 0;
+    Object.assign(camT,{x,y,s:Math.min(3.2,Math.max(1.4,camT.s||cam.s))});
+    requestDraw();
+    return;
+  }
   spot={center, items};
   mode="spot";
-  document.getElementById("back").style.display="block";
+  setBackVisible(true);
   document.getElementById("edgeKey").style.display="block";
-  // camera: fit the connected set (never a lone-node zoom)
+  // Keep the selected node legible; filaments are context, not the camera owner.
   const px=[center.f? center.x: center.x, ...items.map(e=>e.t.pos? e.t.pos.x : e.t.x)];
   const py=[center.f? center.y: center.y, ...items.map(e=>e.t.pos? e.t.pos.y : e.t.y)];
   const minX=Math.min(...px), maxX=Math.max(...px),
         minY=Math.min(...py), maxY=Math.max(...py);
   const spanX=Math.max(maxX-minX,240), spanY=Math.max(maxY-minY,240);
-  const s=Math.min(2.2, Math.min((W-160)/(spanX+180), (H-160)/(spanY+180)));
-  Object.assign(camT,{x:(minX+maxX)/2, y:(minY+maxY)/2, s});
+  const fitS=Math.min(2.2, Math.min((W-160)/(spanX+180), (H-160)/(spanY+180)));
+  const s=Math.min(3.2, Math.max(cam.s, camT.s, fitS, 1.35));
+  const cx=center.f? center.x: center.x, cy=center.f? center.y: center.y;
+  Object.assign(camT,{x:cx, y:cy, s});
   if(center.f) showDetail(center); else showRingDetail(center);
   requestDraw();
 }
 function exitSpot(){
   mode="overview"; spot=null;
-  document.getElementById("back").style.display="none";
   document.getElementById("edgeKey").style.display="none";
-  fitAll();
+  restoreReturnView();
+  setBackVisible(!!selectedFolder || !!selectedFile || !!focusedRing);
   requestDraw();
 }
-document.getElementById("back").onclick=exitSpot;
-addEventListener("keydown", e=>{ if(e.key==="Escape" && mode==="spot") exitSpot(); });
+function backOut(){
+  if(mode==="spot"){ resetToOverview(); return; }
+  if(selectedFile){ clearFileFocus(); return; }
+  if(selectedFolder || focusedRing){ resetToOverview(); return; }
+  resetToOverview();
+}
+document.getElementById("back").onclick=backOut;
+addEventListener("keydown", e=>{
+  if(e.key==="Escape" && (mode==="spot" || selectedFolder || selectedFile || focusedRing)) backOut();
+});
 
 /* ---------- camera ---------- */
 const cam={x:0,y:0,s:1}, camT={x:0,y:0,s:1};
-function fitAll(animate=true){
+function fitAll(animate=true,useTargets=false){
   let maxR=240;
   ringNodes.forEach(r=>maxR=Math.max(maxR,r.radius));
-  groups.forEach(g=>maxR=Math.max(maxR, Math.hypot(g.x,g.y)+g.r));
+  folderNodes.forEach(f=>{
+    const x=useTargets ? f.tx : f.x, y=useTargets ? f.ty : f.y;
+    maxR=Math.max(maxR, Math.hypot(x,y)+f.r+50);
+  });
+  nodes.forEach(n=>{
+    const x=useTargets ? n.tx : n.x, y=useTargets ? n.ty : n.y;
+    maxR=Math.max(maxR, Math.hypot(x,y)+n.r+30);
+  });
   const s=Math.min(W,H)/(2*maxR+90);
   Object.assign(camT,{x:0,y:0,s});
   if(!animate) Object.assign(cam,camT);
 }
+function workspaceBounds(useTargets=false){
+  let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  const include=(x,y,r=0)=>{
+    minX=Math.min(minX,x-r); minY=Math.min(minY,y-r);
+    maxX=Math.max(maxX,x+r); maxY=Math.max(maxY,y+r);
+  };
+  folderNodes.forEach(f=>{
+    const x=useTargets ? f.tx : f.x, y=useTargets ? f.ty : f.y;
+    include(x,y,f.r+46);
+  });
+  nodes.forEach(n=>{
+    const x=useTargets ? n.tx : n.x, y=useTargets ? n.ty : n.y;
+    include(x,y,n.r+24);
+  });
+  if(!isFinite(minX)) return {minX:-240,minY:-240,maxX:240,maxY:240};
+  return {minX,minY,maxX,maxY};
+}
+function fitWorkspace(animate=true,useTargets=false){
+  const b=workspaceBounds(useTargets);
+  const spanX=Math.max(240,b.maxX-b.minX), spanY=Math.max(240,b.maxY-b.minY);
+  const availW=Math.max(360,W-320), availH=Math.max(320,H-100);
+  const s=Math.min(1.35, Math.min(availW/(spanX+170), availH/(spanY+170)));
+  Object.assign(camT,{x:(b.minX+b.maxX)/2, y:(b.minY+b.maxY)/2, s});
+  if(!animate) Object.assign(cam,camT);
+}
+function fitOverview(animate=true,useTargets=false){
+  if(viewMode==="folders") fitWorkspace(animate,useTargets);
+  else fitAll(animate,useTargets);
+}
 function zoomGroup(g){
+  if(g.folder){ zoomFolderNode(g.folder); return; }
   const s=Math.min(W,H)/(2*g.r+170);
   Object.assign(camT,{x:g.x,y:g.y,s});
+}
+function zoomFolderCamera(folder){
+  const b=focusCameraBounds(folder);
+  const spanX=Math.max(110,b.maxX-b.minX), spanY=Math.max(110,b.maxY-b.minY);
+  const availW=Math.max(360,W-300), availH=Math.max(300,H-150);
+  if(folder.children.size>=4){
+    const spokeRadius=Math.max(300, 150+folder.children.size*13+Math.sqrt(folder.count)*3.5);
+    const viewRadius=spokeRadius+250;
+    const s=Math.min(1.05, Math.min(availW/(viewRadius*2), availH/(viewRadius*2)));
+    Object.assign(camT,{x:folder.tx??folder.x, y:folder.ty??folder.y, s:Math.max(0.38,s)});
+  } else {
+    const s=Math.min(6.5, Math.min(availW/(spanX+90), availH/(spanY+90)));
+    Object.assign(camT,{
+      x:(b.minX+b.maxX)/2,
+      y:(b.minY+b.maxY)/2,
+      s:Math.max(1.2,s)
+    });
+  }
+}
+function zoomFolderNode(folder){
+  if(mode==="spot"){
+    leaveSpotState();
+  }
+  focusedRing=null;
+  applyFolderFocus(folder);
+  zoomFolderCamera(folder);
+  showFolderDetail(folder);
+}
+function focusFileNode(node){
+  leaveSpotState();
+  focusedRing=null;
+  if(selectedFolder && !inFolder(selectedFolder,node)) selectedFolder=null;
+  document.getElementById("edgeKey").style.display="none";
+  selected=node;
+  selectedFile=node;
+  setBackVisible(true,"Back to overview");
+  showDetail(node);
+  const x=node.tx ?? node.x, y=node.ty ?? node.y;
+  const s=Math.min(5.2, Math.max(2.4, camT.s || cam.s));
+  Object.assign(camT,{x,y,s});
+  requestDraw();
+}
+function focusRingNode(node){
+  leaveSpotState();
+  if(focusedRing && focusedRing.kind===node.kind &&
+      focusedRing.label===node.name && (focusedRing.tool||null)===(node.tool||null)){
+    clearRingFocus();
+    return;
+  }
+  selected=null; selectedFolder=null; selectedFile=null;
+  resetFocusLayout(800);
+  focusedRing={kind:node.kind,label:node.name,tool:node.tool||null};
+  document.getElementById("edgeKey").style.display="none";
+  setBackVisible(true,"Back to overview");
+  showRingDetail(node);
+  Object.assign(camT,{x:node.x||0,y:node.y||0,s:Math.min(3.2,Math.max(1.6,camT.s||cam.s))});
+  requestDraw();
+}
+function fileShouldSpotlight(node){
+  if(!node || !node.f || node.f.indexed===false) return false;
+  return connectionsOf(node).length>0;
+}
+function selectFileNode(node){
+  if(selectedFile===node){ clearFileFocus(); return; }
+  focusFileNode(node);
+}
+function activatePicked(p){
+  if(!p) return false;
+  if(p.kind==="folder"){ selected=null; zoomFolderNode(p); return true; }
+  if(p.kind){ focusRingNode(p); return true; }
+  if(p.f){ selectFileNode(p); return true; }
+  return false;
+}
+function showRingGroupDetail(label,items){
+  const d=document.getElementById("detail"), b=document.getElementById("dbody");
+  const rows=items.slice(0,24).map(r=>
+    `<li>${esc(r.name)}${r.tool? ` <span>· ${esc(r.tool)}</span>`:""}</li>`).join("");
+  b.innerHTML=`<h2>${esc(label)}</h2>
+    <div class="path">${items.length} item(s)</div>
+    <div class="sum">${items.length? "Select an item in the ring to inspect its connections.":"No items in this group."}</div>
+    ${rows? `<ul>${rows}</ul>`:""}`;
+  d.style.display="block";
+}
+function focusRingGroup(kind,label,tool=null){
+  if(mode==="spot"){
+    leaveSpotState();
+  }
+  if(focusedRing && focusedRing.kind===kind &&
+      focusedRing.label===label && (focusedRing.tool||null)===(tool||null)){
+    clearRingFocus();
+    return;
+  }
+  selected=null; selectedFolder=null; selectedFile=null;
+  resetFocusLayout(800);
+  focusedRing={kind,label,tool};
+  const items=ringNodes.filter(r=>r.kind===kind && (!tool || r.tool===tool));
+  if(!items.length){ showRingGroupDetail(label,items); setBackVisible(true); return; }
+  const xs=items.map(r=>r.x), ys=items.map(r=>r.y);
+  const minX=Math.min(...xs), maxX=Math.max(...xs), minY=Math.min(...ys), maxY=Math.max(...ys);
+  const spanX=Math.max(160,maxX-minX), spanY=Math.max(160,maxY-minY);
+  const s=Math.min(2.3, Math.min((W-180)/(spanX+170), (H-180)/(spanY+170)));
+  Object.assign(camT,{x:(minX+maxX)/2, y:(minY+maxY)/2, s});
+  showRingGroupDetail(label,items);
+  setBackVisible(true,"Back to overview");
+  requestDraw();
 }
 function toScreen(x,y){ return [(x-cam.x)*cam.s+W/2, (y-cam.y)*cam.s+H/2]; }
 function toWorld(px,py){ return [(px-W/2)/cam.s+cam.x, (py-H/2)/cam.s+cam.y]; }
@@ -413,6 +1108,41 @@ function edgeColor(rel){
   return rel==="out"? ACCENT : rel==="in"? BLUE : rel==="sim"? "rgba(139,148,167,0.85)"
        : rel==="agent"? AGENT_COLORS[0] : DIM;
 }
+function revealAlpha(depth){
+  const elapsed=(performance.now()-revealStart)/1000;
+  const start=0.18+Math.max(0,depth)*0.32;
+  const t=Math.max(0, Math.min(1, (elapsed-start)/0.7));
+  return t*t*(3-2*t);
+}
+function drawFolder(x,y,r,color,hot,root=false){
+  ctx.beginPath();
+  if(root){
+    ctx.arc(x,y,r,0,2*Math.PI);
+  } else {
+    const w=r*2.5, h=r*1.75, tab=w*0.36;
+    ctx.moveTo(x-w/2,y-h/2+r*0.3);
+    ctx.lineTo(x-w/2+tab,y-h/2+r*0.3);
+    ctx.lineTo(x-w/2+tab+r*0.22,y-h/2);
+    ctx.lineTo(x-w/2+tab*1.8,y-h/2);
+    ctx.lineTo(x-w/2+tab*2.0,y-h/2+r*0.3);
+    ctx.lineTo(x+w/2,y-h/2+r*0.3);
+    ctx.lineTo(x+w/2,y+h/2);
+    ctx.lineTo(x-w/2,y+h/2);
+    ctx.closePath();
+  }
+  ctx.fillStyle="#0e1118"; ctx.fill();
+  ctx.strokeStyle=color; ctx.lineWidth=hot?2.2:1.2; ctx.stroke();
+}
+function labelText(text,x,y,maxWidth,color="#fff",weight="400"){
+  ctx.fillStyle=color;
+  ctx.font=weight+" 10px Segoe UI";
+  ctx.textAlign="center";
+  const clean=String(text);
+  if(ctx.measureText(clean).width<=maxWidth){ ctx.fillText(clean,x,y); return; }
+  let out=clean;
+  while(out.length>4 && ctx.measureText(out+"…").width>maxWidth) out=out.slice(0,-1);
+  ctx.fillText(out+"…",x,y);
+}
 function drawArrow(fx,fy,tx,ty,col){
   const ang=Math.atan2(ty-fy,tx-fx);
   const px=tx-Math.cos(ang)*12, py=ty-Math.sin(ang)*12;
@@ -423,14 +1153,41 @@ function drawArrow(fx,fy,tx,ty,col){
   ctx.closePath(); ctx.fillStyle=col; ctx.fill();
 }
 
+function measureLabel(text,maxWidth,weight="400"){
+  ctx.font=weight+" 10px Segoe UI";
+  let out=String(text);
+  if(ctx.measureText(out).width<=maxWidth) return {text:out,width:ctx.measureText(out).width};
+  while(out.length>4 && ctx.measureText(out+"…").width>maxWidth) out=out.slice(0,-1);
+  out+="…";
+  return {text:out,width:ctx.measureText(out).width};
+}
+function drawPlacedLabel(text,x,y,maxWidth,color,weight,boxes,force=false){
+  const m=measureLabel(text,maxWidth,weight);
+  const box={x1:x-m.width/2-4,y1:y-11,x2:x+m.width/2+4,y2:y+4};
+  if(!force && boxes.some(b=>!(box.x2<b.x1 || box.x1>b.x2 || box.y2<b.y1 || box.y1>b.y2))) return false;
+  boxes.push(box);
+  labelText(m.text,x,y,maxWidth,color,weight);
+  return true;
+}
+
 function drawBase(alpha){
-  // group halos + all dots, at reduced alpha when spotlighting
+  // folder halos + all dots, at reduced alpha when spotlighting
   for(const g of groups){
     const [sx,sy]=toScreen(g.x,g.y);
     ctx.beginPath(); ctx.arc(sx,sy,g.r*cam.s,0,2*Math.PI);
     ctx.fillStyle=`rgba(120,140,190,${0.045*alpha})`; ctx.fill();
   }
-  const showLinks=document.getElementById("links").checked && mode==="overview";
+  ctx.lineWidth=1;
+  for(const f of folderNodes){
+    if(!f.parent) continue;
+    if(selectedFolder && !inFolder(selectedFolder,f)) continue;
+    const a=alpha*revealAlpha(f.depth);
+    if(a<=0.01) continue;
+    const [px,py]=toScreen(f.parent.x,f.parent.y), [sx,sy]=toScreen(f.x,f.y);
+    ctx.strokeStyle=`rgba(150,170,220,${0.16*a})`;
+    ctx.beginPath(); ctx.moveTo(px,py); ctx.lineTo(sx,sy); ctx.stroke();
+  }
+  const showLinks=document.getElementById("links").checked && mode==="overview" && !selectedFolder && !selectedFile;
   if(showLinks){
     ctx.lineWidth=0.6;
     for(const l of links){
@@ -449,53 +1206,84 @@ function drawBase(alpha){
     ctx.strokeStyle=`rgba(140,150,170,${0.10*alpha})`; ctx.lineWidth=1; ctx.stroke();
   }
   const showNames=document.getElementById("names").checked && mode==="overview";
-  const labelOK = cam.s>1.1;
+  const labelOK = showNames || cam.s>1.1;
+  const labelBoxes=[];
   ctx.globalAlpha=alpha;
-  for(const r of ringNodes){
-    const [sx,sy]=toScreen(r.x,r.y);
-    r._sx=sx; r._sy=sy;
-    drawShape(sx,sy,Math.max(5,7*cam.s),r.shape,r.color,hover===r);
-    if(r.gap){
-      ctx.beginPath(); ctx.arc(sx,sy,Math.max(9,11*cam.s),0,2*Math.PI);
+  for(const f of folderNodes){
+    if(selectedFolder && !inFolder(selectedFolder,f)) continue;
+    const a=revealAlpha(f.depth);
+    if(a<=0.01) continue;
+    const [sx,sy]=toScreen(f.x,f.y);
+    f._sx=sx; f._sy=sy;
+    if(sx<-50||sx>W+50||sy<-50||sy>H+50) continue;
+    const hot=hover===f || selectedFolder===f;
+    ctx.globalAlpha=alpha*a;
+    const r=Math.max(5, f.r*cam.s*(f.parent?0.72:0.9));
+    drawFolder(sx,sy,r,f.color,hot,!f.parent);
+    if(selectedFolder===f){
+      ctx.beginPath(); ctx.arc(sx,sy,r+8,0,2*Math.PI);
       ctx.strokeStyle=ACCENT; ctx.lineWidth=1.2; ctx.stroke();
     }
-    if(mode==="overview" && (cam.s>0.4 || hover===r)){
-      ctx.fillStyle=hover===r? "#fff":DIM;
-      ctx.font="10px Segoe UI"; ctx.textAlign="center";
-      ctx.fillText(r.name,sx,sy+16);
+    if(mode==="overview" && (hot || cam.s>0.45 || f.depth<=1)){
+      const label=f.parent ? f.name+"/" : f.name;
+      const count=f.count ? " · "+f.count : "";
+      drawPlacedLabel(label+count, sx, sy-r-7, Math.max(70, f.r*cam.s*5),
+        hot? "#fff":"rgba(232,236,244,0.9)", hot?"500":"400", labelBoxes, hot || f.depth<=1);
     }
   }
-  {
-    const [sx,sy]=toScreen(0,0);
-    ctx.beginPath(); ctx.arc(sx,sy,Math.max(5,7*cam.s),0,2*Math.PI);
-    ctx.fillStyle="#0e1118"; ctx.fill();
-    ctx.strokeStyle=ACCENT; ctx.lineWidth=1.6; ctx.stroke();
+  ctx.globalAlpha=alpha;
+  if(!selectedFolder){
+    for(const r of ringNodes){
+      const [sx,sy]=toScreen(r.x,r.y);
+      r._sx=sx; r._sy=sy;
+      drawShape(sx,sy,Math.max(5,7*cam.s),r.shape,r.color,hover===r);
+      if(r.gap){
+        ctx.beginPath(); ctx.arc(sx,sy,Math.max(9,11*cam.s),0,2*Math.PI);
+        ctx.strokeStyle=ACCENT; ctx.lineWidth=1.2; ctx.stroke();
+      }
+      if(mode==="overview" && (cam.s>0.4 || hover===r)){
+        ctx.fillStyle=hover===r? "#fff":DIM;
+        ctx.font="10px Segoe UI"; ctx.textAlign="center";
+        ctx.fillText(r.name,sx,sy+16);
+      }
+    }
   }
   for(const n of nodes){
+    if(selectedFolder && !inFolder(selectedFolder,n)) continue;
+    const a=revealAlpha(n.depth);
+    if(a<=0.01) continue;
     const [sx,sy]=toScreen(n.x,n.y);
     n._sx=sx; n._sy=sy;
     if(sx<-30||sx>W+30||sy<-30||sy>H+30) continue;
     const hit=mode==="overview" && matches(n), dimmed=query&&mode==="overview"&&!hit;
-    const r=Math.max(1.1, n.r*cam.s)*(hit?1.6:1);
+    const r=Math.max(n.instruction?2.6:1.1, n.r*cam.s)*(hit?1.6:1)*(n.instruction?1.22:1);
+    ctx.globalAlpha=alpha*a;
     ctx.beginPath(); ctx.arc(sx,sy,r,0,2*Math.PI);
     if(dimmed) ctx.fillStyle="rgba(120,128,145,0.18)";
     else if(n.f.indexed===false) ctx.fillStyle=n.g.color+"73";
     else ctx.fillStyle=n.g.color;
     if(mode==="overview"&&(hover===n||selected===n||hit)){ ctx.shadowColor=n.g.color; ctx.shadowBlur=14; }
     ctx.fill(); ctx.shadowBlur=0;
+    if(n.instruction){
+      ctx.beginPath(); ctx.arc(sx,sy,r+3,0,2*Math.PI);
+      ctx.strokeStyle=ACCENT; ctx.lineWidth=1.2; ctx.stroke();
+    }
     if(mode==="overview" && (((showNames&&labelOK)&&!dimmed) || hover===n || selected===n || (hit&&cam.s>0.5))){
       ctx.fillStyle=hover===n||selected===n? "#fff":"rgba(220,226,240,0.85)";
-      ctx.font="10px Segoe UI"; ctx.textAlign="center";
-      ctx.fillText(n.name,sx,sy-r-4);
+      ctx.font=(n.instruction?"500 ":"")+"10px Segoe UI"; ctx.textAlign="center";
+      const label=n.instruction ? n.f.path.split("/").slice(-2).join("/") : n.name;
+      drawPlacedLabel(label,sx,sy-r-4,Math.max(76,n.r*cam.s*8),ctx.fillStyle,
+        n.instruction?"500":"400", labelBoxes, hover===n || selected===n || hit);
     }
   }
   ctx.globalAlpha=1;
-  if(mode==="overview"){
+  if(mode==="overview" && !selectedFolder){
     ctx.font="600 11px Segoe UI"; ctx.textAlign="center";
     for(const g of groups){
       const [sx,sy]=toScreen(g.x,g.y-g.r-14);
       ctx.fillStyle="rgba(232,236,244,0.92)";
-      ctx.fillText(g.key.toUpperCase()+" · "+g.n, sx, sy);
+      labelText(g.key.toUpperCase()+" · "+g.n, sx, sy, Math.max(90,g.r*cam.s*1.9),
+        "rgba(232,236,244,0.92)","500");
     }
   }
 }
@@ -615,8 +1403,34 @@ function drawShape(x,y,r,shape,color,hot){
 function frame(){
   const dx=camT.x-cam.x, dy=camT.y-cam.y, ds=camT.s-cam.s;
   if(Math.abs(dx)>0.1||Math.abs(dy)>0.1||Math.abs(ds)>0.0008){
-    cam.x+=dx*0.16; cam.y+=dy*0.16; cam.s+=ds*0.16; needsDraw=true;
+    cam.x+=dx*0.09; cam.y+=dy*0.09; cam.s+=ds*0.09; needsDraw=true;
   }
+  if(layoutAnim){
+    const now=performance.now();
+    const moveItem=item=>{
+      const sx=item.sx??item.x, sy=item.sy??item.y;
+      const tx=item.tx??item.x, ty=item.ty??item.y;
+      const dx=tx-sx, dy=ty-sy, dist=Math.hypot(dx,dy);
+      const raw=(now-layoutAnim.start-(item.motionDelay||0))/(item.motionDuration||layoutAnim.duration);
+      const t=Math.max(0,Math.min(1,raw));
+      const eased=t*t*t*(t*(t*6-15)+10);
+      const curve=Math.sin(Math.PI*t)*(item.motionCurve||0);
+      const nx=dist ? -dy/dist : 0, ny=dist ? dx/dist : 0;
+      item.x=sx+dx*eased+nx*curve;
+      item.y=sy+dy*eased+ny*curve;
+      return t>=1;
+    };
+    let done=true;
+    for(const f of folderNodes) done=moveItem(f) && done;
+    for(const n of nodes) done=moveItem(n) && done;
+    if(done){
+      folderNodes.forEach(f=>{ f.x=f.tx; f.y=f.ty; });
+      nodes.forEach(n=>{ n.x=n.tx; n.y=n.ty; });
+      layoutAnim=null;
+    }
+    needsDraw=true;
+  }
+  if(performance.now()-revealStart<6500) needsDraw=true;
   if(needsDraw){ draw(); needsDraw=false; }
   requestAnimationFrame(frame);
 }
@@ -633,9 +1447,12 @@ canvas.addEventListener("mousemove", e=>{
     camT.x-=dx/cam.s; camT.y-=dy/cam.s; cam.x=camT.x; cam.y=camT.y;
     last=[e.clientX,e.clientY]; requestDraw(); return;
   }
-  hover=pick(e.clientX,e.clientY); requestDraw();
+  hover=pick(e.clientX,e.clientY);
+  updateTooltip(hover,e.clientX,e.clientY);
+  requestDraw();
   canvas.style.cursor=hover? "pointer":"grab";
 });
+canvas.addEventListener("mouseleave", ()=>{ hover=null; hideTooltip(); requestDraw(); });
 canvas.addEventListener("wheel", e=>{
   e.preventDefault();
   const k=e.deltaY<0? 1.15:1/1.15;
@@ -649,17 +1466,35 @@ canvas.addEventListener("click", e=>{
   if(dragMoved) return;
   const p=pick(e.clientX,e.clientY);
   if(mode==="spot"){
-    if(!p){ exitSpot(); return; }
-    if(p!==spot.center) enterSpot(p);
+    const centerClick=isNearSpotCenter(e.clientX,e.clientY) || p===spot.center;
+    exitSpot();
+    if(centerClick || !p) return;
+    if(p.kind==="folder"){ zoomFolderNode(p); return; }
+    if(p.f){ selectFileNode(p); return; }
+    if(p.kind){ focusRingNode(p); return; }
     return;
   }
-  if(p && p.kind){ enterSpot(p); return; }
-  if(p && p.f){ selected=p; enterSpot(p); return; }
+  if(mode==="overview" && selectedFile && !p && isNearFocusedFile(e.clientX,e.clientY)){
+    clearFileFocus(); return;
+  }
+  if(p && p.kind==="folder"){
+    if(selectedFolder===p){
+      clearFolderFocus(); return;
+    }
+    activatePicked(p); return;
+  }
+  if(activatePicked(p)) return;
+  if(mode==="overview" && selectedFolder && isNearFocusedFolder(e.clientX,e.clientY)){
+    clearFolderFocus(); return;
+  }
   for(const g of groups){
     const [sx,sy]=toScreen(g.x,g.y);
     if(Math.hypot(e.clientX-sx,e.clientY-sy) < g.r*cam.s+10){ zoomGroup(g); return; }
   }
-  hideDetail(); selected=null; fitAll();
+  if(focusedRing){
+    clearRingFocus(); return;
+  }
+  clearFolderFocus();
 });
 function pick(px,py){
   if(mode==="spot"){
@@ -668,7 +1503,11 @@ function pick(px,py){
     const [cx0,cy0]=toScreen(c.x,c.y);
     if(Math.hypot(px-cx0,py-cy0)<20) return c;
     for(const e of spot.items){
-      if(e._sx===undefined || e.t.folder!==undefined) continue;
+      if(e._sx===undefined) continue;
+      if(e.t.folder!==undefined){
+        if(Math.hypot(px-e._sx,py-e._sy)<24) return pathToFolder[e.t.folder] || null;
+        continue;
+      }
       if(Math.hypot(px-e._sx,py-e._sy)<16) return e.t;
     }
     return pickBase(px,py);
@@ -683,10 +1522,41 @@ function pickBase(px,py){
   for(const n of nodes){
     if(n._sx===undefined) continue;
     const d=Math.hypot(px-n._sx,py-n._sy);
-    if(d<Math.max(6,n.r*cam.s+3) && d<bestD){ best=n; bestD=d; }
+    if(d<Math.max(n.instruction?9:6,n.r*cam.s+4) && d<bestD){ best=n; bestD=d; }
+  }
+  if(best) return best;
+  for(const f of folderNodes){
+    if(f._sx===undefined) continue;
+    const d=Math.hypot(px-f._sx,py-f._sy);
+    if(d<Math.max(12,f.r*cam.s+8) && d<bestD){ best=f; bestD=d; }
   }
   return best;
 }
+
+function updateTooltip(item,px,py){
+  if(!item){ hideTooltip(); return; }
+  const tip=document.getElementById("tip");
+  if(item.f){
+    const kind=item.instruction? "instruction file" :
+      (item.f.indexed===false ? "workspace file" : "indexed markdown");
+    tip.innerHTML=`<b>${esc(item.name)}</b><div class="path">${esc(item.f.path)}</div>
+      <div class="path">${kind} · ${(item.f.bytes/1024).toFixed(1)} KB</div>`;
+  } else if(item.kind==="folder"){
+    tip.innerHTML=`<b>${esc(item.name || IX.root_name)}/</b><div class="path">${esc(item.path || IX.root_name)}</div>
+      <div class="path">${item.count} files · ${item.indexedCount} indexed</div>`;
+  } else {
+    tip.innerHTML=`<b>${esc(item.name)}</b><div class="path">${esc(item.kind+(item.tool? " · "+item.tool:""))}</div>`;
+  }
+  tip.style.display="block";
+  const pad=14;
+  let x=px+14, y=py+14;
+  const r=tip.getBoundingClientRect();
+  if(x+r.width>W-pad) x=px-r.width-14;
+  if(y+r.height>H-pad) y=py-r.height-14;
+  tip.style.left=Math.max(pad,x)+"px";
+  tip.style.top=Math.max(pad,y)+"px";
+}
+function hideTooltip(){ document.getElementById("tip").style.display="none"; }
 
 /* ---------- detail panel ---------- */
 function showDetail(n){
@@ -714,7 +1584,29 @@ function showRingDetail(r){
     <div class="sum">${esc(r.desc||"")}</div>${src}${gap}`;
   d.style.display="block";
 }
+function showFolderDetail(f){
+  const d=document.getElementById("detail"), b=document.getElementById("dbody");
+  const instructions=f.files.filter(isInstructionFile)
+    .map(x=>`<li>${esc(fileName(x.path))} <span>· ${esc(x.path)}</span></li>`).join("");
+  const childCount=f.children.size;
+  const href=f.path ? encodeURI((IX.root_rel||"")+f.path+"/") : encodeURI(IX.root_rel||"../");
+  b.innerHTML=`<h2>${esc(f.name || IX.root_name)}/</h2>
+    <div class="path">${esc(f.path || IX.root_name)}</div>
+    <div class="sum">${f.count} files · ${f.indexedCount} indexed markdown files · ${childCount} child folder(s)</div>
+    <div style="color:var(--dim);font-size:11px">
+      ${(f.bytes/1024).toFixed(1)} KB direct file bytes ·
+      <a href="${href}" target="_blank">open folder</a></div>
+    ${instructions? `<ul>${instructions}</ul>`:""}`;
+  d.style.display="block";
+}
 function hideDetail(){ document.getElementById("detail").style.display="none"; }
+function closeDetail(){
+  if(mode==="spot" || selectedFolder || selectedFile || focusedRing){
+    resetToOverview();
+    return;
+  }
+  hideDetail();
+}
 function esc(s){ return String(s).replace(/[&<>"]/g,
   c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
 
@@ -725,7 +1617,10 @@ document.getElementById("search").addEventListener("input", e=>{
 document.getElementById("search").addEventListener("keydown", e=>{
   if(e.key!=="Enter") return;
   const hit=nodes.find(matches);
-  if(hit){ if(mode==="spot") exitSpot(); selected=hit; enterSpot(hit); }
+  if(hit){
+    if(mode==="spot"){ exitSpot(); focusFileNode(hit); }
+    else { selected=hit; selectFileNode(hit); }
+  }
 });
 document.getElementById("viewSeg").addEventListener("click", e=>{
   const b=e.target && e.target.closest? e.target.closest("button"):null;
