@@ -33,7 +33,22 @@ Notion/Drive — ask where the vault lives rather than guessing.
 **Do not load the whole vault by default.** Read only the note(s) the task needs.
 This is how a plain-markdown brain stays cheap and fast without a vector
 database: route to the relevant note instead of dumping everything into context.
-Use this map:
+
+**Deterministic retrieval first.** For any lookup ("what did we decide about X",
+"who owns Y"), run the bundled engine before searching or opening files:
+
+```
+python brain.py --show "<question>"
+```
+
+It scores every section of the vault against the query keywords — no model
+tokens spent — prints the top matches as `path:line` targets, and prints the
+best section's text. Often that printed section IS the answer and no file needs
+opening. It follows pointer sections one hop, and its index self-rebuilds when
+notes change (`python brain.py --index` forces it). If it prints no match, fall
+back to the routing map below, then Grep.
+
+Routing map:
 
 - Who someone is, their role, who decides → `key-people`
 - Voice, preferences, red lines → `preferences-and-rules`

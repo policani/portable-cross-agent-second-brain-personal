@@ -36,6 +36,14 @@ the token-saving retrieval layer. The same vault is read by all three agents
 through two files kept in parity: Claude reads `CLAUDE.md`; Codex and Cursor both
 read `AGENTS.md` (Cursor reads it natively).
 
+The routing is enforced by code, not just convention. The bundled **`brain.py`**
+(one file, Python stdlib, zero dependencies) indexes every heading-level section
+of the vault and answers "where is X?" deterministically — keyword scoring,
+`path:line` targets, best section printed straight to the terminal — before a
+single model token is spent. The same generated index feeds **`vault-map.html`**,
+an interactive map of the vault (departments, files, skills, connected apps and
+routines) that opens directly from the filesystem: no server, no build step.
+
 ## Why it's valuable
 
 The done-for-you, team-grade version of this is the kind of build that sells for
@@ -83,6 +91,8 @@ knowledge-base/         the 7 notes: snapshot, key-people, preferences-and-rules
 _inbox/                 drop raw material here; ingest turns it into notes directly
 skills/ingest/          capture new material straight into the vault
 skills/curate/          weekly health check
+brain.py                deterministic retrieval: index + query, no dependencies
+vault-map.html          interactive vault map, opens from the filesystem
 index.html              open in a browser to read the vault
 INSTALL.md              setup for Claude, Codex, and Cursor
 ```

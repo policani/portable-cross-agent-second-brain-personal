@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vault Map</title>
+<style>
+  :root{
+    --bg:#07090d; --panel:#10141c; --panel2:#161b26; --line:#232a38;
+    --text:#e8ecf4; --dim:#8b94a7; --accent:#f0a12e;
+    --mem1:#b78cf7; --mem2:#6fc3f0; --mem3:#f78cd2; --mem4:#8cf7b0;
+    --mem5:#f7d98c; --mem6:#8c9df7; --mem7:#f7a58c; --mem8:#8cf7ea;
+    --skill:#f0742e; --routine:#e8c53a; --app:#5b8fd9;
+    --agentA:#5fdba8; --agentB:#49b8d9; --agentC:#d98ae0;
+  }
+  *{box-sizing:border-box; margin:0}
+  html,body{height:100%; overflow:hidden; background:var(--bg);
+    font:13px/1.45 "Segoe UI",system-ui,sans-serif; color:var(--text)}
+  canvas{display:block; cursor:grab}
+  canvas.dragging{cursor:grabbing}
+  .brand{position:fixed; top:14px; left:18px; pointer-events:none}
+  .brand h1{font-size:15px; letter-spacing:.14em; font-weight:600}
+  .brand h1 span{color:var(--accent)}
+  .brand p{color:var(--dim); font-size:11px; margin-top:2px}
+  #hud{position:fixed; top:14px; right:14px; width:236px; background:var(--panel);
+    border:1px solid var(--line); border-radius:10px; padding:12px;
+    max-height:calc(100vh - 28px); overflow:auto}
+  #hud label{display:block; color:var(--dim); font-size:10px;
+    letter-spacing:.1em; text-transform:uppercase; margin:10px 0 4px}
+  #search{width:100%; background:var(--panel2); border:1px solid var(--line);
+    border-radius:6px; color:var(--text); padding:6px 8px; outline:none}
+  #search:focus{border-color:var(--accent)}
+  .seg{display:flex; gap:4px}
+  .seg button{flex:1; background:var(--panel2); border:1px solid var(--line);
+    color:var(--dim); border-radius:6px; padding:5px 0; cursor:pointer; font-size:11px}
+  .seg button.on{color:var(--text); border-color:var(--accent)}
+  .chk{display:flex; align-items:center; gap:6px; margin-top:10px;
+    color:var(--dim); font-size:11px; cursor:pointer}
+  #legend{margin-top:12px; border-top:1px solid var(--line); padding-top:8px;
+    font-size:11px; color:var(--dim)}
+  #legend .row{display:flex; align-items:center; gap:6px; margin-top:4px;
+    cursor:pointer}
+  #legend .row:hover{color:var(--text)}
+  .dot{width:8px; height:8px; border-radius:50%; flex:none}
+  #back{position:fixed; top:14px; left:50%; transform:translateX(-50%);
+    background:var(--panel); border:1px solid var(--accent); color:var(--text);
+    border-radius:8px; padding:7px 16px; cursor:pointer; font-size:12px;
+    display:none; z-index:5}
+  #back:hover{background:var(--panel2)}
+  #edgeKey{position:fixed; left:18px; top:64px; background:var(--panel);
+    border:1px solid var(--line); border-radius:8px; padding:10px 12px;
+    font-size:11px; color:var(--dim); display:none}
+  #edgeKey div{margin-top:3px}
+  #detail{position:fixed; left:18px; bottom:18px; width:340px; max-height:46vh;
+    overflow:auto; background:var(--panel); border:1px solid var(--line);
+    border-radius:10px; padding:14px; display:none}
+  #detail h2{font-size:13px; margin-bottom:2px; word-break:break-all}
+  #detail .path{color:var(--accent); font-size:11px; word-break:break-all}
+  #detail .sum{color:var(--dim); margin:8px 0}
+  #detail ul{list-style:none; margin-top:6px}
+  #detail li{padding:3px 0; border-top:1px solid var(--line); font-size:12px}
+  #detail li span{color:var(--dim); font-size:11px}
+  #detail a{color:var(--mem2); font-size:11px}
+  #detail .x{position:absolute; top:8px; right:12px; color:var(--dim);
+    cursor:pointer; font-size:14px}
+  #empty{position:fixed; inset:0; display:none; place-items:center; text-align:center}
+  #empty div{max-width:420px; color:var(--dim)}
+  #empty code{color:var(--accent); background:var(--panel2); padding:2px 6px;
+    border-radius:4px}
+  #hint{position:fixed; bottom:14px; right:16px; color:var(--dim); font-size:11px;
+    pointer-events:none}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="brand"><h1><span>◆</span> VAULT <span style="color:var(--dim);font-weight:300">MAP</span></h1>
+  <p id="sub">second brain overview</p></div>
+<button id="back">◀ Back to overview</button>
+<div id="edgeKey"><b style="color:var(--text)">connections</b>
+  <div><span style="color:var(--accent)">→</span> links / references out</div>
+  <div><span style="color:var(--mem2)">←</span> referenced by</div>
+  <div><span style="color:var(--dim)">┄</span> similar content</div>
+  <div><span style="color:var(--agentA)">▪</span> agent twin / definition</div>
+</div>
+<div id="hud">
+  <label>Search</label>
+  <input id="search" placeholder="Search files… (Enter zooms)">
+  <label>View</label>
+  <div class="seg" id="viewSeg">
+    <button data-v="departments" class="on">Departments</button>
+    <button data-v="folders">Folders</button>
+  </div>
+  <label class="chk"><input type="checkbox" id="names"> File names</label>
+  <label class="chk"><input type="checkbox" id="links" checked> Filaments</label>
+  <label class="chk"><input type="checkbox" id="censusToggle" checked> All workspace files</label>
+  <div id="legend"></div>
+</div>
+<div id="detail"><span class="x" onclick="hideDetail()">✕</span><div id="dbody"></div></div>
+<div id="empty"><div>
+  <h2 style="color:var(--text);margin-bottom:8px">No index found</h2>
+  <p>This map reads <code>brain-index.js</code>, which is generated next to it.<br><br>
+  Run <code>python brain.py --index</code> in this folder, then reload.</p>
+</div></div>
+<div id="hint">click any node: pivot to its connections · click background: back · drag: pan · wheel: zoom</div>
+<script src="brain-index.js"></script>
+<script>
+"use strict";
+const IX = window.BRAIN_INDEX || null;
+const canvas = document.getElementById("c"), ctx = canvas.getContext("2d");
+let W=0, H=0, DPR = Math.min(window.devicePixelRatio||1, 2);
+function resize(){ W=innerWidth; H=innerHeight;
+  canvas.width=W*DPR; canvas.height=H*DPR;
+  canvas.style.width=W+"px"; canvas.style.height=H+"px"; }
+addEventListener("resize", ()=>{ resize(); requestDraw(); });
+resize();
+
+if(!IX || !IX.files || !IX.files.length){
+  document.getElementById("empty").style.display="grid";
+  document.getElementById("hud").style.display="none";
+  throw new Error("no index");
+}
+const N_INDEXED = IX.files.filter(f=>f.indexed!==false).length;
+document.getElementById("sub").textContent =
+  IX.root_name + " · " + IX.files.length + " files (" + N_INDEXED +
+  " indexed) · " + IX.n_sections + " sections · " + (IX.generated||"").slice(0,10);
+document.getElementById("search").placeholder =
+  "Search " + IX.files.length + " files…";
+
+/* ---------- palette ---------- */
+const cssv = v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const PAL = ["--mem1","--mem2","--mem3","--mem4","--mem5","--mem6","--mem7","--mem8"].map(cssv);
+const SKILL=cssv("--skill"), ROUTINE=cssv("--routine"), APP=cssv("--app"),
+      DIM=cssv("--dim"), ACCENT=cssv("--accent"), BLUE=cssv("--mem2");
+const AGENT_COLORS=[cssv("--agentA"),cssv("--agentB"),cssv("--agentC")];
+
+/* ---------- data ---------- */
+let viewMode = "departments", showCensus = true;
+let nodes=[], groups=[], links=[], ringNodes=[];
+let mode="overview", focusItem=null, focusNodes=[], focusEdges=[];
+const secByFile = {};
+IX.sections.forEach(s=>{ (secByFile[s.file] = secByFile[s.file]||[]).push(s); });
+
+// relationship graph from the index: out-references per indexed page
+const outRefs = {};
+IX.files.forEach(f=>{ if(f.links && f.links.length) outRefs[f.path]=f.links; });
+const inRefs = {};
+for(const [src, refs] of Object.entries(outRefs))
+  refs.forEach(t=>{ (inRefs[t]=inRefs[t]||[]).push(src); });
+
+// merged term vector per indexed file, for similarity
+const fileTerms = {};
+IX.files.forEach(f=>{
+  if(f.indexed===false) return;
+  const t={};
+  (secByFile[f.path]||[]).forEach(s=>{
+    for(const [w,c] of Object.entries(s.terms)) t[w]=(t[w]||0)+c;
+  });
+  fileTerms[f.path] = Object.fromEntries(
+    Object.entries(t).sort((a,b)=>b[1]-a[1]).slice(0,40));
+});
+function cosine(a,b){
+  if(!a||!b) return 0;
+  let dot=0, na=0, nb=0;
+  for(const v of Object.values(a)) na+=v*v;
+  for(const v of Object.values(b)) nb+=v*v;
+  for(const [w,v] of Object.entries(a)) if(b[w]) dot+=v*b[w];
+  return dot/(Math.sqrt(na*nb)||1);
+}
+
+function groupKey(f){
+  const parts=f.path.split("/");
+  if(viewMode==="departments") return parts[0];
+  return parts.length>2 ? parts[0]+"/"+parts[1] : parts[0];
+}
+
+/* ---------- overview build ---------- */
+const GOLDEN = Math.PI*(3-Math.sqrt(5));
+let pathToNode={};
+function buildGraph(){
+  const visible = IX.files.filter(f=> showCensus || f.indexed!==false);
+  const keys=[...new Set(visible.map(groupKey))].sort();
+  const byKey={};
+  visible.forEach(f=>{ (byKey[groupKey(f)]=byKey[groupKey(f)]||[]).push(f); });
+  groups = keys.map((k,i)=>{
+    const n=byKey[k].length;
+    return {key:k, color:PAL[i%PAL.length], n,
+            r: 26 + 4.6*Math.sqrt(n), x:0, y:0};
+  });
+  const placed=[];
+  [...groups].sort((a,b)=>b.n-a.n).forEach((g,gi)=>{
+    if(gi===0){ g.x=0; g.y=0; placed.push(g); return; }
+    let a=gi*2.2, rad=placed[0].r+g.r+70;
+    for(let t=0;t<2000;t++){
+      const x=Math.cos(a)*rad, y=Math.sin(a)*rad;
+      if(placed.every(p=>Math.hypot(x-p.x,y-p.y) > p.r+g.r+46)){
+        g.x=x; g.y=y; placed.push(g); return;
+      }
+      a+=0.35; rad+=2.2;
+    }
+    g.x=Math.cos(a)*rad; g.y=Math.sin(a)*rad; placed.push(g);
+  });
+  const gByKey=Object.fromEntries(groups.map(g=>[g.key,g]));
+  nodes=[]; pathToNode={};
+  for(const k of keys){
+    const g=gByKey[k];
+    const list=byKey[k].slice().sort((a,b)=>
+      (b.indexed===false?0:1)-(a.indexed===false?0:1) || b.bytes-a.bytes);
+    list.forEach((f,i)=>{
+      const rr=g.r*0.92*Math.sqrt((i+0.6)/list.length), th=i*GOLDEN;
+      const node={ f, g,
+        x:g.x+Math.cos(th)*rr, y:g.y+Math.sin(th)*rr,
+        r: f.indexed===false? 1.7 : 2.6+Math.min(6, Math.log2(1+(f.bytes||500)/1500)),
+        name: f.path.split("/").pop() };
+      nodes.push(node); pathToNode[f.path]=node;
+    });
+  }
+  links=[];
+  const idxNodes=nodes.map((n,i)=>[n,i]).filter(([n])=>n.f.indexed!==false);
+  if(idxNodes.length<=900){
+    for(let a=0;a<idxNodes.length;a++){
+      const [na,i]=idxNodes[a]; const sims=[];
+      for(let b=0;b<idxNodes.length;b++){
+        if(a===b) continue;
+        const [nb,j]=idxNodes[b];
+        const s=cosine(fileTerms[na.f.path], fileTerms[nb.f.path]);
+        if(s>0.14) sims.push([s,j]);
+      }
+      sims.sort((x,y)=>y[0]-x[0]).slice(0,2)
+          .forEach(([s,j])=>{ if(i<j) links.push({a:i,b:j,s}); });
+    }
+  }
+  ringNodes=[];
+  let maxR=260;
+  groups.forEach(g=>maxR=Math.max(maxR, Math.hypot(g.x,g.y)+g.r));
+  const arms=IX.arms||{};
+  const mk=(list,kind,color,radius,shape)=> (list||[]).forEach((it,i,arr)=>{
+    ringNodes.push({kind,color,shape,radius,
+      name:it.name||String(it), desc:it.description||it.schedule||it.kind||"",
+      angle:-Math.PI/2 + i*2*Math.PI/arr.length});
+  });
+  mk(arms.skills,"skill",SKILL,maxR+110,"diamond");
+  {
+    const agents=arms.agents||[];
+    const tools=[...new Set(agents.map(a=>a.tool))].sort();
+    const gapRoles=new Set((arms.agent_gaps||[]).map(g=>g.role));
+    agents.forEach((a,i)=>{
+      ringNodes.push({kind:"agent", tool:a.tool,
+        color:AGENT_COLORS[tools.indexOf(a.tool)%AGENT_COLORS.length],
+        shape:"square", radius:maxR+190,
+        name:a.name, desc:a.description||"", path:a.path,
+        gap:gapRoles.has(a.name),
+        angle:-Math.PI/2 + i*2*Math.PI/agents.length});
+    });
+  }
+  mk(arms.routines,"routine",ROUTINE,maxR+270,"circle");
+  mk(arms.applications,"application",APP,maxR+350,"hex");
+  buildLegend(arms);
+  fitAll(false);
+}
+
+function buildLegend(arms){
+  const el=document.getElementById("legend");
+  el.innerHTML="";
+  [...groups].sort((a,b)=>b.n-a.n).forEach(g=>{
+    const row=document.createElement("div");
+    row.className="row";
+    row.innerHTML=`<span class="dot" style="background:${g.color}"></span>${g.key} · ${g.n}`;
+    row.onclick=()=>{ if(mode==="focus") exitFocus(); zoomGroup(g); };
+    el.appendChild(row);
+  });
+  const extra=[["skills",SKILL,(arms.skills||[]).length],
+               ["routines",ROUTINE,(arms.routines||[]).length],
+               ["applications",APP,(arms.applications||[]).length]];
+  extra.forEach(([n,c,cnt])=>{ if(cnt){
+    const row=document.createElement("div"); row.className="row";
+    row.innerHTML=`<span class="dot" style="background:${c}"></span>${n} · ${cnt}`;
+    el.appendChild(row); }});
+  {
+    const agents=arms.agents||[];
+    const tools=[...new Set(agents.map(a=>a.tool))].sort();
+    tools.forEach((t,i)=>{
+      const row=document.createElement("div"); row.className="row";
+      row.innerHTML=`<span class="dot" style="background:${AGENT_COLORS[i%AGENT_COLORS.length]}"></span>agents · ${t} · ${agents.filter(a=>a.tool===t).length}`;
+      el.appendChild(row);
+    });
+    const gaps=(arms.agent_gaps||[]).length;
+    if(gaps){
+      const row=document.createElement("div"); row.className="row";
+      row.innerHTML=`<span class="dot" style="background:${ACCENT}"></span>agent parity gaps · ${gaps}`;
+      el.appendChild(row);
+    }
+  }
+}
+
+/* ---------- focus mode: pivot to the logical neighborhood ---------- */
+function folderExists(ref){
+  return IX.files.some(f=>f.path.startsWith(ref+"/"));
+}
+function itemForRef(ref){
+  const n=pathToNode[ref];
+  if(n) return {type:"file", node:n, key:ref, name:ref.split("/").pop()};
+  if(folderExists(ref))
+    return {type:"folder", key:ref, name:ref.split("/").pop()+"/"};
+  return {type:"missing", key:ref, name:ref.split("/").pop()};
+}
+function neighborsOf(item){
+  // returns [{item, rel}] — rel: out|in|sim|agent|member|parent
+  const out=[];
+  const seen=new Set([item.key]);
+  const push=(it,rel)=>{ if(!seen.has(it.key)){ seen.add(it.key); out.push({item:it, rel}); } };
+  if(item.type==="file"){
+    const p=item.node.f.path;
+    (outRefs[p]||[]).forEach(r=>push(itemForRef(r),"out"));
+    (inRefs[p]||[]).forEach(r=>{ const n=pathToNode[r]; if(n) push({type:"file",node:n,key:r,name:n.name},"in"); });
+    // pages referencing the folder this file lives in
+    const dir=p.split("/").slice(0,-1).join("/");
+    if(dir && inRefs[dir]) inRefs[dir].forEach(r=>{ const n=pathToNode[r]; if(n) push({type:"file",node:n,key:r,name:n.name},"in"); });
+    // similarity (top 6)
+    if(item.node.f.indexed!==false){
+      nodes.filter(n=>n.f.indexed!==false && n.f.path!==p)
+        .map(n=>[cosine(fileTerms[p],fileTerms[n.f.path]),n])
+        .filter(([s])=>s>0.14).sort((a,b)=>b[0]-a[0]).slice(0,6)
+        .forEach(([s,n])=>push({type:"file",node:n,key:n.f.path,name:n.name},"sim"));
+    }
+    // agents defined by this file
+    ringNodes.filter(r=>r.kind==="agent" && r.path===p)
+      .forEach(r=>push({type:"ring",ring:r,key:"agent:"+r.tool+":"+r.name,name:r.name},"agent"));
+  } else if(item.type==="folder"){
+    const members=IX.files.filter(f=>f.path.startsWith(item.key+"/"))
+      .sort((a,b)=>(b.indexed===false?0:1)-(a.indexed===false?0:1)||b.bytes-a.bytes)
+      .slice(0,24);
+    members.forEach(f=>{ const n=pathToNode[f.path];
+      if(n) push({type:"file",node:n,key:f.path,name:n.name},"member"); });
+    (inRefs[item.key]||[]).forEach(r=>{ const n=pathToNode[r]; if(n) push({type:"file",node:n,key:r,name:n.name},"in"); });
+    const parent=item.key.split("/").slice(0,-1).join("/");
+    if(parent) push(itemForRef(parent),"parent");
+  } else if(item.type==="ring"){
+    const r=item.ring;
+    if(r.kind==="agent"){
+      if(r.path && pathToNode[r.path])
+        push({type:"file",node:pathToNode[r.path],key:r.path,name:r.path.split("/").pop()},"out");
+      else if(r.path){ const dir=r.path.split("/").slice(0,-1).join("/");
+        if(dir && folderExists(dir)) push({type:"folder",key:dir,name:dir.split("/").pop()+"/"},"out"); }
+      ringNodes.filter(o=>o.kind==="agent" && o.name===r.name && o.tool!==r.tool)
+        .forEach(o=>push({type:"ring",ring:o,key:"agent:"+o.tool+":"+o.name,name:o.name},"agent"));
+    } else {
+      // routines/applications/skills: match workspace files by name token
+      const tokens=r.name.toLowerCase().split(/[^a-z0-9.\-_]+/).filter(t=>t.length>3);
+      let matched=0;
+      for(const n of nodes){
+        if(matched>=12) break;
+        const nm=n.name.toLowerCase();
+        if(tokens.some(t=>nm.includes(t))){ push({type:"file",node:n,key:n.f.path,name:n.name},"out"); matched++; }
+      }
+    }
+  }
+  return out.slice(0,48);
+}
+
+function enterFocus(item){
+  focusItem=item; mode="focus";
+  document.getElementById("back").style.display="block";
+  document.getElementById("edgeKey").style.display="block";
+  const nb=neighborsOf(item);
+  focusNodes=[{item, x:0, y:0, r:11, center:true}];
+  focusEdges=[];
+  const n1=nb.length||1;
+  nb.forEach((e,i)=>{
+    const a=-Math.PI/2 + i*2*Math.PI/n1;
+    const R1=210;
+    const fn={item:e.item, rel:e.rel, x:Math.cos(a)*R1, y:Math.sin(a)*R1, r:7};
+    focusNodes.push(fn);
+    focusEdges.push({a:0, b:focusNodes.length-1, rel:e.rel});
+    // one hop further for file neighbors with out-refs
+    if(e.item.type==="file" && outRefs[e.item.key]){
+      outRefs[e.item.key].slice(0,3).forEach((r2,j)=>{
+        if(r2===item.key) return;
+        const it2=itemForRef(r2);
+        if(focusNodes.some(x=>x.item.key===it2.key)) return;
+        const a2=a+(j-1)*0.16;
+        focusNodes.push({item:it2, rel:"out2", x:Math.cos(a2)*400, y:Math.sin(a2)*400, r:4, dim:true});
+        focusEdges.push({a:focusNodes.indexOf(fn), b:focusNodes.length-1, rel:"out", dim:true});
+      });
+    }
+  });
+  Object.assign(camT,{x:0,y:0,s:Math.min(W,H)/900});
+  showItemDetail(item);
+  requestDraw();
+}
+function exitFocus(){
+  mode="overview"; focusItem=null; focusNodes=[]; focusEdges=[];
+  document.getElementById("back").style.display="none";
+  document.getElementById("edgeKey").style.display="none";
+  fitAll();
+  requestDraw();
+}
+document.getElementById("back").onclick=exitFocus;
+addEventListener("keydown", e=>{ if(e.key==="Escape" && mode==="focus") exitFocus(); });
+
+function itemColor(fn){
+  const it=fn.item;
+  if(it.type==="file") return it.node.g.color;
+  if(it.type==="folder") return ACCENT;
+  if(it.type==="missing") return DIM;
+  if(it.type==="ring") return it.ring.color;
+  return DIM;
+}
+function edgeColor(rel){
+  return rel==="out"? ACCENT : rel==="in"? BLUE : rel==="sim"? "rgba(139,148,167,0.8)"
+       : rel==="agent"? AGENT_COLORS[0] : rel==="member"? "rgba(139,148,167,0.6)"
+       : rel==="parent"? ACCENT : DIM;
+}
+
+/* ---------- camera ---------- */
+const cam={x:0,y:0,s:1}, camT={x:0,y:0,s:1};
+function fitAll(animate=true){
+  let maxR=240;
+  ringNodes.forEach(r=>maxR=Math.max(maxR,r.radius));
+  groups.forEach(g=>maxR=Math.max(maxR, Math.hypot(g.x,g.y)+g.r));
+  const s=Math.min(W,H)/(2*maxR+90);
+  Object.assign(camT,{x:0,y:0,s});
+  if(!animate) Object.assign(cam,camT);
+}
+function zoomGroup(g){
+  const s=Math.min(W,H)/(2*g.r+170);
+  Object.assign(camT,{x:g.x,y:g.y,s});
+}
+function toScreen(x,y){ return [(x-cam.x)*cam.s+W/2, (y-cam.y)*cam.s+H/2]; }
+function toWorld(px,py){ return [(px-W/2)/cam.s+cam.x, (py-H/2)/cam.s+cam.y]; }
+
+/* ---------- draw ---------- */
+let hover=null, selected=null, query="";
+function matches(n){ return query &&
+  (n.name.toLowerCase().includes(query) ||
+   (n.f.summary||"").toLowerCase().includes(query) ||
+   n.f.path.toLowerCase().includes(query)); }
+
+let needsDraw=true;
+function requestDraw(){ needsDraw=true; }
+
+function drawFocus(){
+  // edges
+  for(const e of focusEdges){
+    const A=focusNodes[e.a], B=focusNodes[e.b];
+    const [ax,ay]=toScreen(A.x,A.y), [bx,by]=toScreen(B.x,B.y);
+    ctx.strokeStyle=edgeColor(e.rel);
+    ctx.globalAlpha=e.dim?0.35:0.8;
+    ctx.lineWidth=e.dim?0.7:1.2;
+    ctx.setLineDash(e.rel==="sim"?[4,4]:[]);
+    ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(bx,by); ctx.stroke();
+    ctx.setLineDash([]);
+    // direction arrow (out: toward B; in: toward A)
+    if(e.rel==="out"||e.rel==="in"||e.rel==="parent"){
+      const toB=e.rel!=="in";
+      const [fx,fy,tx,ty]=toB?[ax,ay,bx,by]:[bx,by,ax,ay];
+      const ang=Math.atan2(ty-fy,tx-fx);
+      const px=tx-Math.cos(ang)*14, py=ty-Math.sin(ang)*14;
+      ctx.beginPath();
+      ctx.moveTo(px+Math.cos(ang)*7, py+Math.sin(ang)*7);
+      ctx.lineTo(px+Math.cos(ang+2.5)*6, py+Math.sin(ang+2.5)*6);
+      ctx.lineTo(px+Math.cos(ang-2.5)*6, py+Math.sin(ang-2.5)*6);
+      ctx.closePath();
+      ctx.fillStyle=edgeColor(e.rel); ctx.fill();
+    }
+    ctx.globalAlpha=1;
+  }
+  // nodes
+  for(const fn of focusNodes){
+    const [sx,sy]=toScreen(fn.x,fn.y);
+    fn._sx=sx; fn._sy=sy;
+    const col=itemColor(fn);
+    const r=Math.max(3,fn.r*cam.s*3);
+    ctx.globalAlpha=fn.dim?0.5:1;
+    if(fn.item.type==="folder"||fn.item.type==="missing"){
+      // rounded-rect badge
+      const w=Math.max(46, fn.item.name.length*6.4)*1, h=20;
+      ctx.beginPath();
+      ctx.roundRect? ctx.roundRect(sx-w/2,sy-h/2,w,h,5) : ctx.rect(sx-w/2,sy-h/2,w,h);
+      ctx.fillStyle="#0e1118"; ctx.fill();
+      ctx.setLineDash(fn.item.type==="missing"?[3,3]:[]);
+      ctx.strokeStyle=col; ctx.lineWidth=hover===fn?2:1.2; ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle=hover===fn?"#fff":"rgba(232,236,244,0.9)";
+      ctx.font="10px Segoe UI"; ctx.textAlign="center";
+      ctx.fillText(fn.item.name, sx, sy+3.5);
+    } else if(fn.item.type==="ring"){
+      drawShape(sx,sy,r,fn.item.ring.shape,col,hover===fn);
+      ctx.fillStyle=hover===fn?"#fff":DIM;
+      ctx.font="10px Segoe UI"; ctx.textAlign="center";
+      ctx.fillText(fn.item.name+" ("+(fn.item.ring.tool||fn.item.ring.kind)+")", sx, sy+r+13);
+    } else {
+      ctx.beginPath(); ctx.arc(sx,sy,r,0,2*Math.PI);
+      ctx.fillStyle=col;
+      if(hover===fn||fn.center){ ctx.shadowColor=col; ctx.shadowBlur=16; }
+      ctx.fill(); ctx.shadowBlur=0;
+      if(fn.center){ ctx.strokeStyle="#fff"; ctx.lineWidth=1.4; ctx.stroke(); }
+      ctx.fillStyle=fn.center||hover===fn?"#fff":"rgba(220,226,240,0.9)";
+      ctx.font=(fn.center?"600 12px":"10px")+" Segoe UI"; ctx.textAlign="center";
+      if(!fn.dim || hover===fn) ctx.fillText(fn.item.name, sx, sy-r-6);
+    }
+    ctx.globalAlpha=1;
+  }
+}
+
+function draw(){
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="rgba(255,255,255,0.02)";
+  for(let gx=0; gx<W; gx+=52) for(let gy=0; gy<H; gy+=52)
+    ctx.fillRect(gx+(gy/52%2?26:0), gy, 1.3, 1.3);
+
+  if(mode==="focus"){ drawFocus(); return; }
+
+  const showNames=document.getElementById("names").checked;
+  const showLinks=document.getElementById("links").checked;
+
+  for(const g of groups){
+    const [sx,sy]=toScreen(g.x,g.y);
+    ctx.beginPath(); ctx.arc(sx,sy,g.r*cam.s,0,2*Math.PI);
+    ctx.fillStyle="rgba(120,140,190,0.045)"; ctx.fill();
+  }
+  if(showLinks){
+    ctx.lineWidth=0.6;
+    for(const l of links){
+      const a=nodes[l.a], b=nodes[l.b];
+      const [ax,ay]=toScreen(a.x,a.y), [bx,by]=toScreen(b.x,b.y);
+      const cross=a.g!==b.g;
+      ctx.strokeStyle="rgba(150,170,220,"+(cross? 0.10+l.s*0.30 : 0.05+l.s*0.14)+")";
+      ctx.beginPath();
+      const mx=(ax+bx)/2+(ay-by)*0.12, my=(ay+by)/2+(bx-ax)*0.12;
+      ctx.moveTo(ax,ay); ctx.quadraticCurveTo(mx,my,bx,by); ctx.stroke();
+    }
+  }
+  for(const ring of [...new Set(ringNodes.map(r=>r.radius))]){
+    const [cx0,cy0]=toScreen(0,0);
+    ctx.beginPath(); ctx.arc(cx0,cy0,ring*cam.s,0,2*Math.PI);
+    ctx.strokeStyle="rgba(140,150,170,0.10)"; ctx.lineWidth=1; ctx.stroke();
+  }
+  for(const r of ringNodes){
+    const x=Math.cos(r.angle)*r.radius, y=Math.sin(r.angle)*r.radius;
+    const [sx,sy]=toScreen(x,y);
+    drawShape(sx,sy,Math.max(5,7*cam.s),r.shape,r.color,hover===r);
+    if(r.gap){
+      ctx.beginPath(); ctx.arc(sx,sy,Math.max(9,11*cam.s),0,2*Math.PI);
+      ctx.strokeStyle=ACCENT; ctx.lineWidth=1.2; ctx.stroke();
+    }
+    if(cam.s>0.4 || hover===r){
+      ctx.fillStyle=hover===r? "#fff":DIM;
+      ctx.font="10px Segoe UI"; ctx.textAlign="center";
+      ctx.fillText(r.name,sx,sy+16);
+    }
+    r._sx=sx; r._sy=sy;
+  }
+  {
+    const [sx,sy]=toScreen(0,0);
+    ctx.beginPath(); ctx.arc(sx,sy,Math.max(5,7*cam.s),0,2*Math.PI);
+    ctx.fillStyle="#0e1118"; ctx.fill();
+    ctx.strokeStyle=ACCENT; ctx.lineWidth=1.6; ctx.stroke();
+  }
+  const labelOK = cam.s>1.1;
+  for(const n of nodes){
+    const [sx,sy]=toScreen(n.x,n.y);
+    n._sx=sx; n._sy=sy;
+    if(sx<-30||sx>W+30||sy<-30||sy>H+30) continue;
+    const hit=matches(n), dimmed=query&&!hit;
+    const r=Math.max(1.1, n.r*cam.s)*(hit?1.6:1);
+    ctx.beginPath(); ctx.arc(sx,sy,r,0,2*Math.PI);
+    if(dimmed) ctx.fillStyle="rgba(120,128,145,0.18)";
+    else if(n.f.indexed===false) ctx.fillStyle=n.g.color+"73";
+    else ctx.fillStyle=n.g.color;
+    if(hover===n||selected===n||hit){ ctx.shadowColor=n.g.color; ctx.shadowBlur=14; }
+    ctx.fill(); ctx.shadowBlur=0;
+    if(((showNames&&labelOK)&&!dimmed) || hover===n || selected===n || (hit&&cam.s>0.5)){
+      ctx.fillStyle=hover===n||selected===n? "#fff":"rgba(220,226,240,0.85)";
+      ctx.font="10px Segoe UI"; ctx.textAlign="center";
+      ctx.fillText(n.name,sx,sy-r-4);
+    }
+  }
+  ctx.font="600 11px Segoe UI"; ctx.textAlign="center";
+  for(const g of groups){
+    const [sx,sy]=toScreen(g.x,g.y-g.r-14);
+    ctx.fillStyle="rgba(232,236,244,0.92)";
+    ctx.fillText(g.key.toUpperCase()+" · "+g.n, sx, sy);
+  }
+}
+function drawShape(x,y,r,shape,color,hot){
+  ctx.beginPath();
+  if(shape==="hex"){ for(let i=0;i<6;i++){ const a=Math.PI/6+i*Math.PI/3;
+      const px=x+Math.cos(a)*r*1.4, py=y+Math.sin(a)*r*1.4;
+      i?ctx.lineTo(px,py):ctx.moveTo(px,py);} ctx.closePath(); }
+  else if(shape==="diamond"){ ctx.moveTo(x,y-r*1.3); ctx.lineTo(x+r*1.3,y);
+    ctx.lineTo(x,y+r*1.3); ctx.lineTo(x-r*1.3,y); ctx.closePath(); }
+  else if(shape==="square"){ ctx.rect(x-r,y-r,2*r,2*r); }
+  else ctx.arc(x,y,r,0,2*Math.PI);
+  ctx.fillStyle="#0e1118"; ctx.fill();
+  ctx.strokeStyle=color; ctx.lineWidth=hot?2.2:1.4; ctx.stroke();
+}
+
+/* ---------- loop ---------- */
+function frame(){
+  const dx=camT.x-cam.x, dy=camT.y-cam.y, ds=camT.s-cam.s;
+  if(Math.abs(dx)>0.1||Math.abs(dy)>0.1||Math.abs(ds)>0.0008){
+    cam.x+=dx*0.16; cam.y+=dy*0.16; cam.s+=ds*0.16; needsDraw=true;
+  }
+  if(needsDraw){ draw(); needsDraw=false; }
+  requestAnimationFrame(frame);
+}
+
+/* ---------- interaction ---------- */
+let dragging=false, dragMoved=false, last=[0,0];
+canvas.addEventListener("mousedown", e=>{ dragging=true; dragMoved=false;
+  last=[e.clientX,e.clientY]; canvas.classList.add("dragging"); });
+addEventListener("mouseup", ()=>{ dragging=false; canvas.classList.remove("dragging"); });
+canvas.addEventListener("mousemove", e=>{
+  if(dragging){
+    const dx=e.clientX-last[0], dy=e.clientY-last[1];
+    if(Math.abs(dx)+Math.abs(dy)>3) dragMoved=true;
+    camT.x-=dx/cam.s; camT.y-=dy/cam.s; cam.x=camT.x; cam.y=camT.y;
+    last=[e.clientX,e.clientY]; requestDraw(); return;
+  }
+  hover=pick(e.clientX,e.clientY); requestDraw();
+  canvas.style.cursor=hover? "pointer":"grab";
+});
+canvas.addEventListener("wheel", e=>{
+  e.preventDefault();
+  const k=e.deltaY<0? 1.15:1/1.15;
+  const [wx,wy]=toWorld(e.clientX,e.clientY);
+  camT.s=Math.min(10,Math.max(0.03,camT.s*k));
+  camT.x=wx-(e.clientX-W/2)/camT.s;
+  camT.y=wy-(e.clientY-H/2)/camT.s;
+  requestDraw();
+},{passive:false});
+canvas.addEventListener("click", e=>{
+  if(dragMoved) return;
+  const p=pick(e.clientX,e.clientY);
+  if(mode==="focus"){
+    if(!p){ exitFocus(); return; }
+    if(p.item && !p.center){ enterFocus(p.item); return; }
+    if(p.item && p.center) return;
+    return;
+  }
+  if(p && p.kind){ // ring node → pivot to its connections
+    enterFocus({type:"ring", ring:p, key:(p.kind==="agent"?("agent:"+p.tool+":"):"ring:")+p.name, name:p.name});
+    return;
+  }
+  if(p && p.f){ // file node → pivot
+    selected=p;
+    enterFocus({type:"file", node:p, key:p.f.path, name:p.name});
+    return;
+  }
+  for(const g of groups){
+    const [sx,sy]=toScreen(g.x,g.y);
+    if(Math.hypot(e.clientX-sx,e.clientY-sy) < g.r*cam.s+10){ zoomGroup(g); return; }
+  }
+  hideDetail(); selected=null; fitAll();
+});
+function pick(px,py){
+  if(mode==="focus"){
+    let best=null, bestD=1e9;
+    for(const fn of focusNodes){
+      if(fn._sx===undefined) continue;
+      const d=Math.hypot(px-fn._sx,py-fn._sy);
+      const hitR=fn.item.type==="folder"||fn.item.type==="missing"? 26 : 16;
+      if(d<hitR && d<bestD){ best=fn; bestD=d; }
+    }
+    return best;
+  }
+  // overview: rings first (they are sparse and small), then file dots
+  for(const r of ringNodes){
+    if(Math.hypot(px-(r._sx??-1e4),py-(r._sy??-1e4))<14) return r;
+  }
+  let best=null, bestD=1e9;
+  for(const n of nodes){
+    if(n._sx===undefined) continue;
+    const d=Math.hypot(px-n._sx,py-n._sy);
+    if(d<Math.max(6,n.r*cam.s+3) && d<bestD){ best=n; bestD=d; }
+  }
+  return best;
+}
+
+/* ---------- detail panel ---------- */
+function showItemDetail(item){
+  if(item.type==="file") showDetail(item.node);
+  else if(item.type==="ring") showRingDetail(item.ring);
+  else if(item.type==="folder") showFolderDetail(item);
+  else hideDetail();
+}
+function showDetail(n){
+  const d=document.getElementById("detail"), b=document.getElementById("dbody");
+  const secs=(secByFile[n.f.path]||[]).map(s=>
+    `<li>#${esc(s.heading)} <span>· line ${s.line}</span></li>`).join("");
+  const href=encodeURI((IX.root_rel||"")+n.f.path);
+  const rels=(outRefs[n.f.path]||[]).length + (inRefs[n.f.path]||[]).length;
+  b.innerHTML=`<h2>${esc(n.name)}</h2>
+    <div class="path">${esc(n.f.path)}</div>
+    <div class="sum">${esc(n.f.summary||"")}</div>
+    <div style="color:var(--dim);font-size:11px">
+      ${n.f.indexed===false? "workspace file (not content-indexed)": n.f.sections+" sections"} ·
+      ${(n.f.bytes/1024).toFixed(1)} KB · ${rels} connection(s) ·
+      <a href="${href}" target="_blank">open file</a></div>
+    <ul>${secs}</ul>`;
+  d.style.display="block";
+}
+function showFolderDetail(item){
+  const d=document.getElementById("detail"), b=document.getElementById("dbody");
+  const count=IX.files.filter(f=>f.path.startsWith(item.key+"/")).length;
+  b.innerHTML=`<h2>${esc(item.name)}</h2>
+    <div class="path">${esc(item.key)}</div>
+    <div class="sum">folder · ${count} files · referenced by ${(inRefs[item.key]||[]).length} page(s)</div>`;
+  d.style.display="block";
+}
+function showRingDetail(r){
+  const d=document.getElementById("detail"), b=document.getElementById("dbody");
+  const gap=r.gap? `<div style="color:${ACCENT};font-size:11px;margin-top:6px">⚠ parity gap: this role is missing a counterpart in another tool</div>`:"";
+  const src=r.path? `<div style="font-size:11px;margin-top:4px"><span style="color:var(--dim)">defined in</span> ${esc(r.path)}</div>`:"";
+  b.innerHTML=`<h2>${esc(r.name)}</h2>
+    <div class="path" style="color:${r.color}">${r.kind==="agent"? "agent · "+r.tool : r.kind}</div>
+    <div class="sum">${esc(r.desc||"")}</div>${src}${gap}`;
+  d.style.display="block";
+}
+function hideDetail(){ document.getElementById("detail").style.display="none"; }
+function esc(s){ return String(s).replace(/[&<>"]/g,
+  c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+/* ---------- HUD ---------- */
+document.getElementById("search").addEventListener("input", e=>{
+  query=e.target.value.trim().toLowerCase(); requestDraw();
+});
+document.getElementById("search").addEventListener("keydown", e=>{
+  if(e.key!=="Enter") return;
+  const hit=nodes.find(matches);
+  if(hit){ if(mode==="focus") exitFocus();
+    selected=hit; enterFocus({type:"file",node:hit,key:hit.f.path,name:hit.name}); }
+});
+document.getElementById("viewSeg").addEventListener("click", e=>{
+  const b=e.target && e.target.closest? e.target.closest("button"):null;
+  if(!b) return;
+  viewMode=b.dataset.v;
+  document.querySelectorAll("#viewSeg button").forEach(x=>
+    x.classList.toggle("on",x===b));
+  if(mode==="focus") exitFocus();
+  buildGraph(); requestDraw();
+});
+document.getElementById("names").addEventListener("change", requestDraw);
+document.getElementById("links").addEventListener("change", requestDraw);
+document.getElementById("censusToggle").addEventListener("change", e=>{
+  showCensus=e.target.checked;
+  if(mode==="focus") exitFocus();
+  buildGraph(); requestDraw();
+});
+
+buildGraph();
+frame();
+</script>
+</body>
+</html>
