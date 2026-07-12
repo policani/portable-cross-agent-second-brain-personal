@@ -24,7 +24,13 @@
   .brand p{color:var(--dim); font-size:11px; margin-top:2px}
   #hud{position:fixed; top:14px; right:14px; width:236px; background:var(--panel);
     border:1px solid var(--line); border-radius:10px; padding:12px;
-    max-height:calc(100vh - 28px); overflow:auto}
+    max-height:calc(100vh - 28px); overflow:auto; transition:transform .2s ease,opacity .2s ease}
+  #hud.hud-hidden{transform:translateX(calc(100% + 20px));opacity:0;pointer-events:none}
+  #hudToggle{position:fixed;top:14px;right:264px;z-index:6;width:31px;height:31px;
+    display:grid;place-items:center;background:var(--panel);border:1px solid var(--line);border-radius:8px;
+    color:var(--dim);cursor:pointer;font-size:16px;line-height:1;transition:right .2s ease,color .15s,border-color .15s}
+  #hudToggle:hover{color:var(--text);border-color:var(--accent)}
+  #hud.hud-hidden + #hudToggle{right:14px}
   #hud label{display:block; color:var(--dim); font-size:10px;
     letter-spacing:.1em; text-transform:uppercase; margin:10px 0 4px}
   #search{width:100%; background:var(--panel2); border:1px solid var(--line);
@@ -74,10 +80,24 @@
     border:1px solid var(--line); border-radius:8px; padding:7px 9px;
     color:var(--text); font-size:11px; box-shadow:0 10px 30px rgba(0,0,0,.28)}
   #tip .path{color:var(--dim); margin-top:2px; word-break:break-all}
+  #loadmask{position:fixed; inset:0; display:grid; place-items:center; background:var(--bg);
+    z-index:40; transition:opacity .5s ease}
+  #loadmask.hide{opacity:0; pointer-events:none}
+  #loadmask .ring{width:42px; height:42px; margin:0 auto 14px; border:3px solid var(--line);
+    border-top-color:var(--accent); border-radius:50%; animation:vm-spin .9s linear infinite}
+  @keyframes vm-spin{to{transform:rotate(360deg)}}
+  #loadmask h2{color:var(--text); font-size:14px; letter-spacing:.14em; font-weight:600; margin-bottom:4px}
+  #loadmask p{color:var(--dim); font-size:11px}
+  #buildstatus{position:fixed; bottom:38px; left:50%; transform:translateX(-50%);
+    background:var(--panel); border:1px solid var(--line); border-radius:20px;
+    padding:4px 12px; font-size:11px; color:var(--dim); display:none; z-index:6}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
+<div id="loadmask"><div style="text-align:center"><div class="ring"></div>
+  <h2>BUILDING MAP</h2><p>laying out the vault…</p></div></div>
+<div id="buildstatus"></div>
 <div class="brand"><h1><span>◆</span> VAULT <span style="color:var(--dim);font-weight:300">MAP</span></h1>
   <p id="sub">second brain overview</p></div>
 <button id="back">◀ Back to overview</button>
@@ -100,6 +120,7 @@
   <label class="chk"><input type="checkbox" id="censusToggle" checked> All workspace files</label>
   <div id="legend"></div>
 </div>
+<button id="hudToggle" type="button" aria-controls="hud" aria-expanded="true" title="Hide search and display controls">×</button>
 <div id="detail"><span class="x" onclick="closeDetail()">✕</span><div id="dbody"></div></div>
 <div id="empty"><div>
   <h2 style="color:var(--text);margin-bottom:8px">No index found</h2>
@@ -736,20 +757,6 @@ function buildGraph(){
   assignFolderColors();
   layoutTree();
   links=[];
-  const idxNodes=nodes.map((n,i)=>[n,i]).filter(([n])=>n.f.indexed!==false);
-  if(idxNodes.length<=900){
-    for(let a=0;a<idxNodes.length;a++){
-      const [na,i]=idxNodes[a]; const sims=[];
-      for(let b=0;b<idxNodes.length;b++){
-        if(a===b) continue;
-        const [nb,j]=idxNodes[b];
-        const s=cosine(fileTerms[na.f.path], fileTerms[nb.f.path]);
-        if(s>0.14) sims.push([s,j]);
-      }
-      sims.sort((x,y)=>y[0]-x[0]).slice(0,2)
-          .forEach(([s,j])=>{ if(i<j) links.push({a:i,b:j,s}); });
-    }
-  }
   ringNodes=[];
   let maxR=260;
   folderNodes.forEach(f=>maxR=Math.max(maxR, Math.hypot(f.x,f.y)+f.r+70));
@@ -780,6 +787,42 @@ function buildGraph(){
   buildLegend(arms);
   revealStart=performance.now();
   fitOverview(false);
+  computeLinksProgressive();   // similarity filaments weave in after first paint
+}
+
+/* Build the O(N^2) similarity links in small per-frame chunks instead of one
+   blocking pass, so nodes appear immediately and connections stream in. */
+let linkJob=null;
+function setBuildStatus(text){
+  const el=document.getElementById("buildstatus");
+  if(!el) return;
+  if(text){ el.textContent=text; el.style.display="block"; } else el.style.display="none";
+}
+function computeLinksProgressive(){
+  if(linkJob) linkJob.cancel=true;
+  links.length=0;
+  const idxNodes=nodes.map((n,i)=>[n,i]).filter(([n])=>n.f.indexed!==false);
+  if(idxNodes.length>1300){ setBuildStatus(""); return; }   // too dense to be legible
+  const job={cancel:false}; linkJob=job;
+  const total=idxNodes.length; let a=0;
+  const step=()=>{
+    if(job.cancel) return;
+    const end=Math.min(total, a+24);
+    for(; a<end; a++){
+      const [na,i]=idxNodes[a]; const sims=[];
+      for(let b=0;b<total;b++){
+        if(a===b) continue;
+        const [nb,j]=idxNodes[b];
+        const s=cosine(fileTerms[na.f.path], fileTerms[nb.f.path]);
+        if(s>0.14) sims.push([s,j]);
+      }
+      sims.sort((x,y)=>y[0]-x[0]).slice(0,2).forEach(([s,j])=>{ if(i<j) links.push({a:i,b:j,s}); });
+    }
+    requestDraw();
+    if(a<total){ setBuildStatus("weaving connections… "+Math.round(a/total*100)+"%"); requestAnimationFrame(step); }
+    else { linkJob=null; setBuildStatus(""); }
+  };
+  requestAnimationFrame(step);
 }
 
 function buildLegend(arms){
@@ -1611,6 +1654,14 @@ function esc(s){ return String(s).replace(/[&<>"]/g,
   c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
 
 /* ---------- HUD ---------- */
+const hud=document.getElementById("hud"), hudToggle=document.getElementById("hudToggle");
+function setHudVisible(visible){
+  hud.classList.toggle("hud-hidden",!visible);
+  hudToggle.textContent=visible? "×":"☰";
+  hudToggle.setAttribute("aria-expanded",String(visible));
+  hudToggle.title=visible? "Hide search and display controls":"Show search and display controls";
+}
+hudToggle.addEventListener("click",()=>setHudVisible(hud.classList.contains("hud-hidden")));
 document.getElementById("search").addEventListener("input", e=>{
   query=e.target.value.trim().toLowerCase(); requestDraw();
 });
@@ -1639,8 +1690,15 @@ document.getElementById("censusToggle").addEventListener("change", e=>{
   buildGraph(); requestDraw();
 });
 
-buildGraph();
-frame();
+requestAnimationFrame(()=>{      // let the loading mask paint before we build
+  buildGraph();
+  frame();
+  requestAnimationFrame(()=>{    // nodes are laid out and drawing — fade the mask out
+    const m=document.getElementById("loadmask");
+    if(m) m.classList.add("hide");
+    setTimeout(()=>{ if(m) m.style.display="none"; }, 600);
+  });
+});
 </script>
 </body>
 </html>

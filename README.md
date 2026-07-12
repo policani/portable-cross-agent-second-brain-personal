@@ -20,6 +20,17 @@ links to it and what it links to.*
 > is the same core with a propose-then-approve gate, so shared memory stays
 > trustworthy when more than one person (and their agents) write to it.
 
+## Management Console
+
+Open **`Open-Second-Brain-Console.bat`** to launch the browser console with a
+local-only helper. Its **Refresh** button rebuilds `brain-index.js` and reloads
+the same page, with a timestamp down to the second. The constellation's search
+and display controls can be tucked away with the × button and restored with ☰.
+
+`vault-map.html` still opens directly from the folder for a standalone map. For
+the live refresh workflow, keep the minimized local server window open while you
+use the console. Nothing is uploaded and no account is required.
+
 ## How it works
 
 ```mermaid
@@ -46,9 +57,10 @@ The routing is enforced by code, not just convention. The bundled **`brain.py`**
 (one file, Python stdlib, zero dependencies) indexes every heading-level section
 of the vault and answers "where is X?" deterministically — keyword scoring,
 `path:line` targets, best section printed straight to the terminal — before a
-single model token is spent. The same generated index feeds **`vault-map.html`**,
-an interactive map of the vault (departments, files, skills, connected apps and
-routines) that opens directly from the filesystem: no server, no build step.
+single model token is spent. The same generated index feeds the **Management
+Console** (`index.html`) and **`vault-map.html`**, an interactive map of the
+vault (departments, files, skills, connected apps and routines) that opens
+directly from the filesystem.
 
 ## Why it's valuable
 
@@ -98,8 +110,10 @@ _inbox/                 drop raw material here; ingest turns it into notes direc
 skills/ingest/          capture new material straight into the vault
 skills/curate/          weekly health check
 brain.py                deterministic retrieval: index + query, no dependencies
+index.html              Management Console — Constellation, Types, Sizes, Table
 vault-map.html          interactive vault map, opens from the filesystem
-index.html              open in a browser to read the vault
+serve-second-brain.py   localhost-only helper for live console refreshes
+Open-Second-Brain-Console.bat  one-click launcher for the live console
 INSTALL.md              setup for Claude, Codex, and Cursor
 ```
 
