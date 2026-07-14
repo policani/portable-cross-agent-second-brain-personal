@@ -1,6 +1,6 @@
-# Portable Cross-Agent Second Brain — Personal
+# KnoVault — Personal
 
-A plain-markdown second brain for **one person**, working the same in **Claude,
+KnoVault is a plain-markdown second brain for **one person**, working the same in **Claude,
 Codex, and Cursor** through two instruction files. It routes to the note it needs
 instead of loading everything, so it **saves tokens** — and because you're the
 only user, there's no approval queue: the AI drafts straight into your notes and
@@ -10,15 +10,26 @@ No database. No vectors. No Obsidian. No lock-in. Clone it, fill in seven notes,
 point any of three agents at it, and your AI stops forgetting who you are between
 sessions.
 
-![Vault map, personal edition: your notes and projects as dot clusters inside rings of skills, routines, and connected applications — select a note to see its connections](assets/vault-map-personal.png)
+![KnoVault constellation, personal edition: your notes and projects as dot clusters inside rings of skills, routines, and connected applications — select a note to see its connections](assets/vault-map-personal.svg)
 
 *The bundled `vault-map.html` renders your vault like this — open it straight
 from the folder, no server, no build step. Click any note to spotlight what
 links to it and what it links to.*
 
-> **Working with a team?** The [Team edition](https://github.com/policani/portable-cross-agent-second-brain)
-> is the same core with a propose-then-approve gate, so shared memory stays
-> trustworthy when more than one person (and their agents) write to it.
+> **Working with a team?** Use the Team edition, which adds a propose-then-approve
+> gate so shared memory stays trustworthy when more than one person (and their
+> agents) write to it.
+
+## Management Console
+
+Open **`Open-KnoVault-Console.bat`** to launch the browser console with a
+local-only helper. Its **Refresh** button rebuilds `brain-index.js` and reloads
+the same page, with a timestamp down to the second. The constellation's search
+and display controls can be tucked away with the × button and restored with ☰.
+
+`vault-map.html` still opens directly from the folder for a standalone map. For
+the live refresh workflow, keep the minimized local server window open while you
+use the console. Nothing is uploaded and no account is required.
 
 ## How it works
 
@@ -46,9 +57,10 @@ The routing is enforced by code, not just convention. The bundled **`brain.py`**
 (one file, Python stdlib, zero dependencies) indexes every heading-level section
 of the vault and answers "where is X?" deterministically — keyword scoring,
 `path:line` targets, best section printed straight to the terminal — before a
-single model token is spent. The same generated index feeds **`vault-map.html`**,
-an interactive map of the vault (departments, files, skills, connected apps and
-routines) that opens directly from the filesystem: no server, no build step.
+single model token is spent. The same generated index feeds the **Management
+Console** (`index.html`) and **`vault-map.html`**, an interactive map of the
+vault (departments, files, skills, connected apps and routines) that opens
+directly from the filesystem.
 
 ## Why it's valuable
 
@@ -98,8 +110,10 @@ _inbox/                 drop raw material here; ingest turns it into notes direc
 skills/ingest/          capture new material straight into the vault
 skills/curate/          weekly health check
 brain.py                deterministic retrieval: index + query, no dependencies
+index.html              Management Console — Constellation, Types, Sizes, Table
 vault-map.html          interactive vault map, opens from the filesystem
-index.html              open in a browser to read the vault
+serve-second-brain.py   localhost-only helper for live console refreshes
+Open-KnoVault-Console.bat     one-click launcher for the live console
 INSTALL.md              setup for Claude, Codex, and Cursor
 ```
 
@@ -154,5 +168,4 @@ first delivery.
 
 ---
 
-Built by [Marco Policani](https://policani.net). MIT licensed — plain markdown,
-no dependencies, yours to run and adapt.
+MIT licensed — plain markdown, no dependencies, yours to run and adapt.

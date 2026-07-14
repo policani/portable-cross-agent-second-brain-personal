@@ -1,4 +1,4 @@
-# Portable Cross-Agent Second Brain (Personal) — operating guide for Claude
+# KnoVault — Personal operating guide for Claude
 
 This is your living memory: the owner's solo second brain. Read from it to do
 their work in their voice and context, and help keep it current. The owner is the
