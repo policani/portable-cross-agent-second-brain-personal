@@ -8,8 +8,10 @@
   :root{
     --bg:#07090d; --panel:#10141c; --panel2:#161b26; --line:#232a38;
     --text:#e8ecf4; --dim:#8b94a7; --accent:#f0a12e;
-    --mem1:#b78cf7; --mem2:#6fc3f0; --mem3:#f78cd2; --mem4:#8cf7b0;
-    --mem5:#f7d98c; --mem6:#8c9df7; --mem7:#f7a58c; --mem8:#8cf7ea;
+    /* Folder regions use a restrained, separate palette. File-role colours
+       are reserved for the temporary highlight overlay below. */
+    --mem1:#5d7895; --mem2:#487f91; --mem3:#76658f; --mem4:#5f876c;
+    --mem5:#99794f; --mem6:#5a71a0; --mem7:#97676b; --mem8:#557f88;
     --skill:#f0742e; --routine:#e8c53a; --app:#5b8fd9;
     --agentA:#5fdba8; --agentB:#49b8d9; --agentC:#d98ae0;
   }
@@ -91,6 +93,10 @@
   #buildstatus{position:fixed; bottom:38px; left:50%; transform:translateX(-50%);
     background:var(--panel); border:1px solid var(--line); border-radius:20px;
     padding:4px 12px; font-size:11px; color:var(--dim); display:none; z-index:6}
+  #highlightStatus{position:fixed;left:18px;top:63px;display:none;align-items:center;gap:7px;
+    background:rgba(16,20,28,.92);border:1px solid var(--line);border-radius:8px;padding:6px 9px;
+    color:var(--text);font-size:11px;box-shadow:0 8px 26px rgba(0,0,0,.2);pointer-events:none}
+  #highlightStatus .dot{width:9px;height:9px;box-shadow:0 0 11px currentColor}
 </style>
 </head>
 <body>
@@ -100,6 +106,7 @@
 <div id="buildstatus"></div>
 <div class="brand"><h1><span>◆</span> VAULT <span style="color:var(--dim);font-weight:300">MAP</span></h1>
   <p id="sub">second brain overview</p></div>
+<div id="highlightStatus"><span class="dot"></span><span></span></div>
 <button id="back">◀ Back to overview</button>
 <div id="edgeKey"><b style="color:var(--text)">connections</b>
   <div><span style="color:var(--accent)">→</span> links / references out</div>
@@ -166,6 +173,22 @@ let viewMode = "departments", showCensus = true;
 let nodes=[], groups=[], links=[], ringNodes=[], folderNodes=[];
 let mode="overview";           // overview | spot
 let spot=null;                 // {center, items:Map(target->rel), edges:[...]}
+let highlightDimension="role", highlightValue=null, highlightFolderCounts=new Map(), highlightStarted=0;
+const ROLE_PALETTE={logic:"#b78cf7",reference:"#6fc3f0",output:"#5fdba8",template:"#f0a12e",office:"#8cf7ea",graphic:"#ff8fb1",media:"#f7a58c",software:"#7c8cf8",archive:"#c9b06f",script:"#f78cd2"};
+const ROLE_LABELS={logic:"AI logic",reference:"Reference",output:"Output",template:"Template",office:"Office",graphic:"Graphics",media:"Media",software:"Software",archive:"Backup",script:"Script"};
+const FORMAT_HIGHLIGHT=["#f0c94b","#f0714e","#e08ef5","#69d2ff","#83f0c0","#ffb36b","#ff7da6","#aeb8ff"];
+const ROLE_EXT={};
+"py pyw js mjs cjs jsx ts tsx sh bash zsh fish ps1 psm1 vb vbs sql r lua pl pm php java kt kts c cpp cc cxx h hpp cs fs fsx go rs swift rkt scala dart ex exs erl hrl clj cljs groovy gvy gradle tf hcl bicep asm s sv vhd vhdl ipynb json jsonc json5 yaml yml toml ini cfg conf properties env css scss sass less xml xsl xslt".split(" ").forEach(x=>ROLE_EXT[x]="script");
+"doc docx docm dot dotx odt rtf pdf xls xlsx xlsm xlsb ods csv tsv ppt pptx pptm pps ppsx odp pub vsd vsdx one".split(" ").forEach(x=>ROLE_EXT[x]="office");
+"png apng jpg jpeg jpe gif bmp dib webp tif tiff heic heif avif ico cur svg ai eps ps psd psb xcf kra ora sketch fig".split(" ").forEach(x=>ROLE_EXT[x]="graphic");
+"mp4 m4v mov avi mkv webm mpg mpeg m2ts mts ts wmv flv ogv 3gp 3g2 mp3 wav aiff aif flac m4a aac ogg oga opus wma amr mid midi".split(" ").forEach(x=>ROLE_EXT[x]="media");
+"exe msi msp msix msixbundle appx appxbundle appimage deb rpm pkg dmg apk aab ipa jar war ear bin run com gadget".split(" ").forEach(x=>ROLE_EXT[x]="software");
+"zip zipx rar 7z tar gz tgz bz2 xz zst lz lz4 cab arj lha lzh sit sitx dmg iso img vhd vhdx qcow2 bak backup".split(" ").forEach(x=>ROLE_EXT[x]="archive");
+function extOf(path){ const n=fileName(path), i=n.lastIndexOf("."); return i>=0?n.slice(i+1).toLowerCase():"(none)"; }
+function roleOf(f){ if(f.category&&ROLE_PALETTE[f.category]) return f.category; const p=f.path.toLowerCase(), name=fileName(p), ext=extOf(p); if(ROLE_EXT[ext]) return ROLE_EXT[ext]; if(/(^|\/)(examples\/sample-outputs|sample-outputs|generated|indexes)(\/|$)/.test(p)||/\d{4}-\d{2}-\d{2}/.test(name)) return "output"; if(/(^|\/)templates(\/|$)/.test(p)||/_template\.md$|-template\.md$/.test(name)) return "template"; if(["agents.md","claude.md","skill.md"].includes(name)||/(^|\/)(chatgpt-project|workflow|skills)(\/|$)/.test(p)||/(trigger[-_]map|operating[-_]model|handoff[-_]rules|guardrail|runtime|start[-_]here|_prompt\.md$|[-_]prompts?\.md$|routing[-_]rules)/.test(name)) return "logic"; return "reference"; }
+function highlightKey(f){ return highlightDimension==="format" ? extOf(f.path) : roleOf(f); }
+function highlightColor(){ if(highlightDimension==="role") return ROLE_PALETTE[highlightValue]||ACCENT; const seed=String(highlightValue||"").split("").reduce((n,c)=>n+c.charCodeAt(0),0); return FORMAT_HIGHLIGHT[seed%FORMAT_HIGHLIGHT.length]||ACCENT; }
+function highlightLabel(){ return highlightDimension==="role" ? (ROLE_LABELS[highlightValue]||highlightValue) : "."+highlightValue; }
 const secByFile = {};
 IX.sections.forEach(s=>{ (secByFile[s.file] = secByFile[s.file]||[]).push(s); });
 
@@ -373,6 +396,15 @@ function addFileNode(f, folder, x, y, instruction=false){
     instruction: instruction || isInstructionFile(f),
     depth: folder.depth+1 };
   nodes.push(node); pathToNode[f.path]=node;
+}
+
+function setHighlight(dimension,value){
+  highlightDimension=dimension==="format" ? "format" : "role"; highlightValue=value||null; highlightStarted=performance.now(); highlightFolderCounts=new Map();
+  if(highlightValue) nodes.forEach(n=>{ if(highlightKey(n.f)!==highlightValue) return; for(let folder=n.folder; folder; folder=folder.parent) highlightFolderCounts.set(folder,(highlightFolderCounts.get(folder)||0)+1); });
+  const status=document.getElementById("highlightStatus");
+  if(highlightValue){ status.style.display="flex"; const dot=status.querySelector(".dot"); dot.style.background=highlightColor(); dot.style.color=highlightColor(); status.querySelector("span:last-child").textContent=highlightLabel()+" highlighted · folder markers show matching locations"; }
+  else status.style.display="none";
+  requestDraw();
 }
 
 function rememberBaseLayout(){
@@ -827,7 +859,7 @@ function computeLinksProgressive(){
 
 function buildLegend(arms){
   const el=document.getElementById("legend");
-  el.innerHTML="";
+  el.innerHTML='<div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:5px">Folder regions</div>';
   [...groups].sort((a,b)=>b.n-a.n).forEach(g=>{
     const row=document.createElement("div");
     row.className="row";
@@ -1263,13 +1295,15 @@ function drawBase(alpha){
     ctx.globalAlpha=alpha*a;
     const r=Math.max(5, f.r*cam.s*(f.parent?0.72:0.9));
     drawFolder(sx,sy,r,f.color,hot,!f.parent);
+    const matchingHere=highlightValue ? (highlightFolderCounts.get(f)||0) : 0;
+    if(matchingHere){ const hc=highlightColor(), pulse=0.55+0.25*Math.sin((performance.now()-highlightStarted)/260); ctx.beginPath(); ctx.arc(sx,sy,r+5+pulse*3,0,2*Math.PI); ctx.strokeStyle=hc; ctx.globalAlpha=alpha*a*(0.55+pulse*0.3); ctx.lineWidth=1.5; ctx.stroke(); }
     if(selectedFolder===f){
       ctx.beginPath(); ctx.arc(sx,sy,r+8,0,2*Math.PI);
       ctx.strokeStyle=ACCENT; ctx.lineWidth=1.2; ctx.stroke();
     }
     if(mode==="overview" && (hot || cam.s>0.45 || f.depth<=1)){
       const label=f.parent ? f.name+"/" : f.name;
-      const count=f.count ? " · "+f.count : "";
+      const count=matchingHere&&f.depth<=2 ? " · "+matchingHere+" match"+(matchingHere===1?"":"es") : (f.count ? " · "+f.count : "");
       drawPlacedLabel(label+count, sx, sy-r-7, Math.max(70, f.r*cam.s*5),
         hot? "#fff":"rgba(232,236,244,0.9)", hot?"500":"400", labelBoxes, hot || f.depth<=1);
     }
@@ -1298,20 +1332,23 @@ function drawBase(alpha){
     const [sx,sy]=toScreen(n.x,n.y);
     n._sx=sx; n._sy=sy;
     if(sx<-30||sx>W+30||sy<-30||sy>H+30) continue;
-    const hit=mode==="overview" && matches(n), dimmed=query&&mode==="overview"&&!hit;
-    const r=Math.max(n.instruction?2.6:1.1, n.r*cam.s)*(hit?1.6:1)*(n.instruction?1.22:1);
-    ctx.globalAlpha=alpha*a;
+    const hit=mode==="overview" && matches(n), roleMatch=highlightValue&&highlightKey(n.f)===highlightValue;
+    const dimmed=(query&&mode==="overview"&&!hit) || (highlightValue&&!roleMatch);
+    const r=Math.max(n.instruction?2.6:1.1, n.r*cam.s)*(hit||roleMatch?1.6:1)*(n.instruction?1.22:1);
+    ctx.globalAlpha=alpha*a*(highlightValue?(roleMatch?1:0.16):1);
+    if(roleMatch){ const hc=highlightColor(), pulse=0.55+0.3*Math.sin((performance.now()-highlightStarted)/230); ctx.beginPath(); ctx.arc(sx,sy,r+7+pulse*5,0,2*Math.PI); ctx.strokeStyle=hc; ctx.globalAlpha=alpha*a*(0.24+pulse*0.18); ctx.lineWidth=1.3; ctx.stroke(); ctx.globalAlpha=alpha*a; }
     ctx.beginPath(); ctx.arc(sx,sy,r,0,2*Math.PI);
     if(dimmed) ctx.fillStyle="rgba(120,128,145,0.18)";
+    else if(roleMatch) ctx.fillStyle=highlightColor();
     else if(n.f.indexed===false) ctx.fillStyle=n.g.color+"73";
     else ctx.fillStyle=n.g.color;
-    if(mode==="overview"&&(hover===n||selected===n||hit)){ ctx.shadowColor=n.g.color; ctx.shadowBlur=14; }
+    if(mode==="overview"&&(hover===n||selected===n||hit||roleMatch)){ ctx.shadowColor=roleMatch?highlightColor():n.g.color; ctx.shadowBlur=roleMatch?20:14; }
     ctx.fill(); ctx.shadowBlur=0;
     if(n.instruction){
       ctx.beginPath(); ctx.arc(sx,sy,r+3,0,2*Math.PI);
       ctx.strokeStyle=ACCENT; ctx.lineWidth=1.2; ctx.stroke();
     }
-    if(mode==="overview" && (((showNames&&labelOK)&&!dimmed) || hover===n || selected===n || (hit&&cam.s>0.5))){
+    if(mode==="overview" && (((showNames&&labelOK)&&!dimmed) || hover===n || selected===n || (hit&&cam.s>0.5) || (roleMatch&&cam.s>0.5))){
       ctx.fillStyle=hover===n||selected===n? "#fff":"rgba(220,226,240,0.85)";
       ctx.font=(n.instruction?"500 ":"")+"10px Segoe UI"; ctx.textAlign="center";
       const label=n.instruction ? n.f.path.split("/").slice(-2).join("/") : n.name;
@@ -1474,6 +1511,7 @@ function frame(){
     needsDraw=true;
   }
   if(performance.now()-revealStart<6500) needsDraw=true;
+  if(highlightValue && performance.now()-highlightStarted<1400) needsDraw=true;
   if(needsDraw){ draw(); needsDraw=false; }
   requestAnimationFrame(frame);
 }
@@ -1680,18 +1718,21 @@ document.getElementById("viewSeg").addEventListener("click", e=>{
   document.querySelectorAll("#viewSeg button").forEach(x=>
     x.classList.toggle("on",x===b));
   if(mode==="spot") exitSpot();
-  buildGraph(); requestDraw();
+  buildGraph(); setHighlight(highlightDimension,highlightValue); requestDraw();
 });
 document.getElementById("names").addEventListener("change", requestDraw);
 document.getElementById("links").addEventListener("change", requestDraw);
 document.getElementById("censusToggle").addEventListener("change", e=>{
   showCensus=e.target.checked;
   if(mode==="spot") exitSpot();
-  buildGraph(); requestDraw();
+  buildGraph(); setHighlight(highlightDimension,highlightValue); requestDraw();
 });
+addEventListener("message",e=>{ const d=e.data; if(d&&d.type==="vault-map-highlight") setHighlight(d.dimension,d.value); });
 
 requestAnimationFrame(()=>{      // let the loading mask paint before we build
   buildGraph();
+  setHighlight(highlightDimension,highlightValue);
+  if(window.parent!==window) window.parent.postMessage({type:"vault-map-ready"},"*");
   frame();
   requestAnimationFrame(()=>{    // nodes are laid out and drawing — fade the mask out
     const m=document.getElementById("loadmask");

@@ -38,7 +38,7 @@
   .kpi .l{font-size:10px;color:var(--dim);letter-spacing:.04em;text-transform:uppercase;margin-top:2px;display:flex;align-items:center;gap:5px}
   .kpi .l .sw{width:8px;height:8px;border-radius:2px}
   .kpi.click{cursor:pointer} .kpi.click:hover{border-color:var(--accentDim)}
-  .kpi.on{border-color:var(--accent)}
+  .kpi.on{border-color:var(--accent);box-shadow:0 0 0 1px rgba(240,161,46,.16),0 0 18px rgba(240,161,46,.12)}
   .gen{font-size:10px;color:var(--dim2);white-space:nowrap;text-align:right}
 
   main{flex:1;display:grid;grid-template-columns:240px 1fr 330px;min-height:0}
@@ -243,29 +243,33 @@ const extOf=p=>{const n=fileName(p); const i=n.lastIndexOf("."); return i>=0?n.s
  *  Roles are heuristic and tunable; rules are first-match wins.
  * ============================================================= */
 const ROLES={
-  logic:    {label:"AI logic",  color:"#b78cf7", hex:"#b78cf7", desc:"Instructions, prompts, operating models, skills"},
-  reference:{label:"Reference", color:"#6fc3f0", hex:"#6fc3f0", desc:"Wiki, knowledge, docs, READMEs"},
-  output:   {label:"Output",    color:"#5fdba8", hex:"#5fdba8", desc:"Generated artifacts, sample outputs, indexes"},
-  template: {label:"Template",  color:"#f0a12e", hex:"#f0a12e", desc:"Reusable templates and forms"},
-  script:   {label:"Script",    color:"#f78cd2", hex:"#f78cd2", desc:"Code & tooling: .py .js .html .toml .json"},
-  office:   {label:"Office",    color:"#8cf7ea", hex:"#8cf7ea", desc:"Documents: .docx .pptx .xlsx .csv .pdf"},
-  media:    {label:"Media",     color:"#f7a58c", hex:"#f7a58c", desc:"Images, video, audio, screen recordings"},
-  software: {label:"Software",  color:"#7c8cf8", hex:"#7c8cf8", desc:"Executables & installers: .exe .msi .scr .app .deb .jar"},
-  archive:  {label:"Backup",    color:"#c9b06f", hex:"#c9b06f", desc:"Archives & images: .zip .rar .7z .tar .dmg .iso"}
+  logic:    {label:"AI logic",  color:"#b78cf7", hex:"#b78cf7", desc:"Instructions, prompts, agent skills, workflows, and routing rules (for example AGENTS.md, CLAUDE.md, SKILL.md)."},
+  reference:{label:"Reference", color:"#6fc3f0", hex:"#6fc3f0", desc:"Knowledge and documentation: .md, .txt, .rst, .adoc, .org, and .tex."},
+  output:   {label:"Output",    color:"#5fdba8", hex:"#5fdba8", desc:"Generated artifacts, sample outputs, indexes, and date-stamped results."},
+  template: {label:"Template",  color:"#f0a12e", hex:"#f0a12e", desc:"Reusable forms and starters, identified by template folders or template-style filenames."},
+  office:   {label:"Office",    color:"#8cf7ea", hex:"#8cf7ea", desc:"Documents and tables: .docx, .xlsx, .pptx, .pdf, .csv, .tsv, .odt, .ods, .rtf, and .vsdx."},
+  graphic:  {label:"Graphics",  color:"#ff8fb1", hex:"#ff8fb1", desc:"Raster, vector, and design assets: .png, .jpg, .gif, .bmp, .webp, .svg, .tiff, .heic, .avif, .psd, .ai, and .xcf."},
+  media:    {label:"Media",     color:"#f7a58c", hex:"#f7a58c", desc:"Audio and video: .mp4, .mov, .mkv, .webm, .mp3, .wav, .flac, .m4a, .aac, and .ogg."},
+  software: {label:"Software",  color:"#7c8cf8", hex:"#7c8cf8", desc:"Programs and installers: .exe, .msi, .msix, .appx, .appimage, .deb, .rpm, .apk, .pkg, and .jar."},
+  archive:  {label:"Backup",    color:"#c9b06f", hex:"#c9b06f", desc:"Archives and disk images: .zip, .rar, .7z, .tar, .gz, .bz2, .zst, .iso, .img, .vhdx, and .bak."},
+  script:   {label:"Script",    color:"#f78cd2", hex:"#f78cd2", desc:"Code and configuration: .py, .js, .ts, .tsx, .ps1, .sh, .sql, .json, .yaml, .toml, .css, and .html."}
 };
-const ROLE_ORDER=["logic","reference","output","template","office","media","software","archive","script"];
+const ROLE_ORDER=["logic","reference","output","template","office","graphic","media","software","archive","script"];
 const EXT_ROLE={};
-const SCRIPT_EXT=["py","js","mjs","cjs","ts","sh","bash","ipynb","toml","yaml","yml","json","css","rb","go","rs","html","xml"];
-const OFFICE_EXT=["docx","doc","pptx","ppt","xlsx","xls","xlsm","csv","tsv","pdf","odt","ods","rtf"];
-const MEDIA_EXT=["png","jpg","jpeg","gif","svg","webp","bmp","ico","tif","tiff","mp4","mov","avi","mkv","webm","mpg","mpeg","wmv","mp3","wav","m4a","aac","trec"];
-const SOFTWARE_EXT=["exe","msi","scr","app","appimage","appx","msix","deb","rpm","apk","pkg","jar","bat","cmd","com","gadget"];
-const ARCHIVE_EXT=["zip","rar","7z","tar","gz","tgz","bz2","bak","xz","zst","dmg","iso"];
+const SCRIPT_EXT="py pyw js mjs cjs jsx ts tsx sh bash zsh fish ps1 psm1 vb vbs sql r lua pl pm php java kt kts c cpp cc cxx h hpp cs fs fsx go rs swift rkt scala dart ex exs erl hrl clj cljs groovy gvy gradle tf hcl bicep asm s sv vhd vhdl ipynb json jsonc json5 yaml yml toml ini cfg conf properties env css scss sass less xml xsl xslt".split(" ");
+const OFFICE_EXT="doc docx docm dot dotx odt rtf pdf xls xlsx xlsm xlsb ods csv tsv ppt pptx pptm pps ppsx odp pub vsd vsdx one".split(" ");
+const GRAPHIC_EXT="png apng jpg jpeg jpe gif bmp dib webp tif tiff heic heif avif ico cur svg ai eps ps psd psb xcf kra ora sketch fig".split(" ");
+const MEDIA_EXT="mp4 m4v mov avi mkv webm mpg mpeg m2ts mts ts wmv flv ogv 3gp 3g2 mp3 wav aiff aif flac m4a aac ogg oga opus wma amr mid midi".split(" ");
+const SOFTWARE_EXT="exe msi msp msix msixbundle appx appxbundle appimage deb rpm pkg dmg apk aab ipa jar war ear bin run com gadget".split(" ");
+const ARCHIVE_EXT="zip zipx rar 7z tar gz tgz bz2 xz zst lz lz4 cab arj lha lzh sit sitx dmg iso img vhd vhdx qcow2 bak backup".split(" ");
 SCRIPT_EXT.forEach(e=>EXT_ROLE[e]="script");
 OFFICE_EXT.forEach(e=>EXT_ROLE[e]="office");
+GRAPHIC_EXT.forEach(e=>EXT_ROLE[e]="graphic");
 MEDIA_EXT.forEach(e=>EXT_ROLE[e]="media");
 SOFTWARE_EXT.forEach(e=>EXT_ROLE[e]="software");
 ARCHIVE_EXT.forEach(e=>EXT_ROLE[e]="archive");
 function roleOf(f){
+  if(f.category && ROLES[f.category]) return f.category;
   const p=f.path.toLowerCase(), name=fileName(p), ext=extOf(p);
   if(EXT_ROLE[ext]) return EXT_ROLE[ext];               // binaries & code win by extension
   if(/(^|\/)(examples\/sample-outputs|sample-outputs|generated)(\/|$)/.test(p)) return "output";
@@ -313,7 +317,7 @@ function typeGroups(set){
 }
 
 /* ---------- state ---------- */
-const S={ q:"", dim:"role", type:null, folder:"", sort:"path", dir:1, mode:"constellation", sel:null, colFilter:{} };
+const S={ q:"", dim:"role", type:null, highlight:null, folder:"", sort:"path", dir:1, mode:"constellation", sel:null, colFilter:{} };
 
 /* value a file shows in a given table column — used for Excel-style filtering */
 function colVal(f,k){
@@ -358,14 +362,16 @@ function renderHeader(){
     "<br>"+files.length+" files · "+kb(totB)+(DEMO?" · <b style='color:var(--warn)'>sample</b>":"");
   const groups=typeGroups(files);
   const wrap=$("#kpis"); wrap.innerHTML="";
-  const mk=(v,l,cls,sw,onClick,on)=>{ const d=el("div","kpi"+(onClick?" click":"")+(on?" on":""));
+  const mk=(v,l,cls,sw,onClick,on,tip)=>{ const d=el("div","kpi"+(onClick?" click":"")+(on?" on":""));
     d.innerHTML=`<div class="v ${cls||''}">${v}</div><div class="l">${sw?`<span class="sw" style="background:${sw}"></span>`:''}${l}</div>`;
-    if(onClick) d.onclick=onClick; wrap.appendChild(d); };
+    if(onClick){ d.title=(tip?tip+" ":"")+`Click to highlight ${l} locations on the constellation map`; d.onclick=onClick; }
+    wrap.appendChild(d); };
   mk(files.length,"files");
   mk(kb(totB),"size");
   groups.forEach(g=>{
     mk(g.items.length, esc(dimLabel(g.key)), "", dimHexOf(g.key),
-      ()=>setType(S.type===g.key?null:g.key), S.type===g.key);
+      ()=>toggleHighlight(S.highlight===g.key?null:g.key), S.highlight===g.key,
+      S.dim==="role"&&ROLES[g.key]?ROLES[g.key].desc:"");
   });
 }
 
@@ -373,12 +379,15 @@ function renderHeader(){
  *  LEFT RAIL
  * ============================================================= */
 function renderTypeRail(){
-  $("#typesLabel").textContent = S.dim==="role" ? "File roles" : "File formats";
+  const isMap=S.mode==="constellation";
+  $("#typesLabel").textContent = isMap ? (S.dim==="role" ? "Highlight file roles" : "Highlight file formats") : (S.dim==="role" ? "File roles" : "File formats");
   const wrap=$("#types"); wrap.innerHTML="";
   const base=scoped();
   typeGroups(base).forEach(g=>{
-    const d=el("div","lens"+(S.type===g.key?" on":""));
+    const active=isMap ? S.highlight===g.key : S.type===g.key;
+    const d=el("div","lens"+(active?" on":""));
     d.innerHTML=`<span class="swatch" style="background:${dimColorOf(g.key)}"></span><span>${esc(dimLabel(g.key))}</span><span class="c">${g.items.length}</span>`;
+    if(S.dim==="role"&&ROLES[g.key]) d.title=ROLES[g.key].desc;
     d.onclick=()=>setType(S.type===g.key?null:g.key);
     wrap.appendChild(d);
   });
@@ -430,7 +439,10 @@ function renderModeSeg(){
 }
 function renderCrumbs(){
   if(!viewById(S.mode).filters){
-    $("#crumbs").innerHTML=`<b>${viewById(S.mode).label}</b> · full-vault visual — pan/zoom inside`;
+    let h=`<b>${viewById(S.mode).label}</b> · full-vault visual — pan/zoom inside`;
+    if(S.highlight!=null) h+=` · <b>${esc(dimLabel(S.highlight))}</b> highlighted <span class="clear" id="clearf">clear</span>`;
+    $("#crumbs").innerHTML=h;
+    const c=$("#clearf"); if(c) c.onclick=()=>toggleHighlight(null);
     return;
   }
   const list=filtered();
@@ -441,12 +453,17 @@ function renderCrumbs(){
   if(Object.keys(S.colFilter).length) html+=` · <b>${Object.keys(S.colFilter).length}</b> column filter(s)`;
   if(S.type!=null||S.folder||S.q||Object.keys(S.colFilter).length) html+=`<span class="clear" id="clearf">clear</span>`;
   $("#crumbs").innerHTML=html;
-  const c=$("#clearf"); if(c) c.onclick=()=>{ S.q=""; $("#search").value=""; S.type=null; S.folder=""; S.colFilter={}; renderAll(); };
+  const c=$("#clearf"); if(c) c.onclick=()=>{ S.q=""; $("#search").value=""; S.type=null; S.highlight=null; S.folder=""; S.colFilter={}; renderAll(); };
 }
 
 /* ---- Constellation (petri dish, hero default) ---- */
+let constellationFrame=null;
+function sendConstellationHighlight(){ if(constellationFrame&&constellationFrame.contentWindow) constellationFrame.contentWindow.postMessage({type:"vault-map-highlight",dimension:S.dim,value:S.highlight},"*"); }
 function renderConstellation(){
-  $("#stage").innerHTML=`<iframe title="Constellation" src="vault-map.html" style="width:100%;height:100%;border:0;display:block;background:#07090d"></iframe>`;
+  const stage=$("#stage");
+  if(!constellationFrame){ constellationFrame=document.createElement("iframe"); constellationFrame.title="Constellation"; constellationFrame.src="vault-map.html"; constellationFrame.style.cssText="width:100%;height:100%;border:0;display:block;background:#07090d"; constellationFrame.onload=sendConstellationHighlight; }
+  if(!stage.contains(constellationFrame)){ stage.innerHTML=""; stage.appendChild(constellationFrame); }
+  sendConstellationHighlight();
 }
 
 /* ---- Types: counts + sizes per role/format ---- */
@@ -723,9 +740,10 @@ function renderArmInspector(key){
 /* ============================================================= *
  *  ORCHESTRATION
  * ============================================================= */
-function setType(v){ S.type=v; renderTypeRail(); renderHeader(); renderCrumbs(); renderCenter(); }
+function toggleHighlight(v){ S.highlight=v; renderTypeRail(); renderHeader(); renderCrumbs(); if(S.mode==="constellation") sendConstellationHighlight(); }
+function setType(v){ if(S.mode==="constellation"){ toggleHighlight(S.highlight===v?null:v); return; } S.type=v; renderTypeRail(); renderHeader(); renderCrumbs(); renderCenter(); }
 function setFolder(p){ S.folder=(S.folder===p&&p!=="")?"":p; renderTree(); renderTypeRail(); renderHeader(); renderCrumbs(); renderCenter(); }
-function setDim(d){ if(S.dim===d) return; S.dim=d; S.type=null;
+function setDim(d){ if(S.dim===d) return; S.dim=d; S.type=null; S.highlight=null;
   document.querySelectorAll("#dimToggle button").forEach(b=>b.classList.toggle("on",b.dataset.d===d));
   renderTypeRail(); renderHeader(); renderCrumbs(); renderCenter(); }
 function renderAll(){ renderHeader(); renderModeSeg(); renderTypeRail(); renderTree(); renderArms(); renderCrumbs(); renderCenter(); renderInspector(); }
@@ -736,6 +754,7 @@ function renderTypes(){ return renderTypes2(); }
 /* events */
 $("#search").addEventListener("input",e=>{ S.q=e.target.value.trim(); renderTypeRail(); renderHeader(); renderCrumbs(); renderCenter(); });
 $("#dimToggle").addEventListener("click",e=>{ const b=e.target.closest("button"); if(b) setDim(b.dataset.d); });
+addEventListener("message",e=>{ if(e.data&&e.data.type==="vault-map-ready") sendConstellationHighlight(); });
 let rt; addEventListener("resize",()=>{ clearTimeout(rt); rt=setTimeout(()=>{ if(S.mode==="sizes") renderCenter(); },150); });
 
 /* boot */
