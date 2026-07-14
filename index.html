@@ -765,10 +765,10 @@ renderAll();
   const served=location.protocol==="http:"||location.protocol==="https:";
   btn.title=served
     ? "Rebuild the index and reload this console."
-    : "Open Open-Second-Brain-Console.bat to refresh this page automatically.";
+    : "Open Open-KnoVault-Console.bat to refresh this page automatically.";
   btn.onclick=async()=>{
     if(!served){
-      alert("For a live rebuild and same-page reload, open Open-Second-Brain-Console.bat.\n\nYou can also run: python brain.py --index");
+      alert("For a live rebuild and same-page reload, open Open-KnoVault-Console.bat.\n\nYou can also run: python brain.py --index");
       return;
     }
     const original=btn.textContent; btn.textContent="⟳ Reindexing…"; btn.disabled=true;

@@ -22,7 +22,7 @@ links to it and what it links to.*
 
 ## Management Console
 
-Open **`Open-Second-Brain-Console.bat`** to launch the browser console with a
+Open **`Open-KnoVault-Console.bat`** to launch the browser console with a
 local-only helper. Its **Refresh** button rebuilds `brain-index.js` and reloads
 the same page, with a timestamp down to the second. The constellation's search
 and display controls can be tucked away with the × button and restored with ☰.
@@ -113,7 +113,7 @@ brain.py                deterministic retrieval: index + query, no dependencies
 index.html              Management Console — Constellation, Types, Sizes, Table
 vault-map.html          interactive vault map, opens from the filesystem
 serve-second-brain.py   localhost-only helper for live console refreshes
-Open-Second-Brain-Console.bat  one-click launcher for the live console
+Open-KnoVault-Console.bat     one-click launcher for the live console
 INSTALL.md              setup for Claude, Codex, and Cursor
 ```
 
