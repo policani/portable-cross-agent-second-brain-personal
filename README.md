@@ -10,7 +10,7 @@ No database. No vectors. No Obsidian. No lock-in. Clone it, fill in seven notes,
 point any of three agents at it, and your AI stops forgetting who you are between
 sessions.
 
-![Vault map, personal edition: your notes and projects as dot clusters inside rings of skills, routines, and connected applications — select a note to see its connections](assets/vault-map-personal.png)
+![KnoVault constellation, personal edition: your notes and projects as dot clusters inside rings of skills, routines, and connected applications — select a note to see its connections](assets/vault-map-personal.svg)
 
 *The bundled `vault-map.html` renders your vault like this — open it straight
 from the folder, no server, no build step. Click any note to spotlight what
