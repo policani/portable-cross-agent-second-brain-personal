@@ -1,5 +1,5 @@
 @echo off
-REM Open the live Second Brain console. Refresh then rebuilds the local index
+REM Open the live KnoVault console. Refresh then rebuilds the local index
 REM and reloads the same browser page. Close the minimized server window to stop it.
 cd /d "%~dp0"
 
@@ -13,4 +13,4 @@ if not defined PY (
   exit /b 1
 )
 
-start "Second Brain Console" /min %PY% serve-second-brain.py
+start "KnoVault Console" /min %PY% serve-second-brain.py

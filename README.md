@@ -1,6 +1,6 @@
-# Portable Cross-Agent Second Brain — Personal
+# KnoVault — Personal
 
-A plain-markdown second brain for **one person**, working the same in **Claude,
+KnoVault is a plain-markdown second brain for **one person**, working the same in **Claude,
 Codex, and Cursor** through two instruction files. It routes to the note it needs
 instead of loading everything, so it **saves tokens** — and because you're the
 only user, there's no approval queue: the AI drafts straight into your notes and
@@ -16,9 +16,9 @@ sessions.
 from the folder, no server, no build step. Click any note to spotlight what
 links to it and what it links to.*
 
-> **Working with a team?** The [Team edition](https://github.com/policani/portable-cross-agent-second-brain)
-> is the same core with a propose-then-approve gate, so shared memory stays
-> trustworthy when more than one person (and their agents) write to it.
+> **Working with a team?** Use the Team edition, which adds a propose-then-approve
+> gate so shared memory stays trustworthy when more than one person (and their
+> agents) write to it.
 
 ## Management Console
 
@@ -168,5 +168,4 @@ first delivery.
 
 ---
 
-Built by [Marco Policani](https://policani.net). MIT licensed — plain markdown,
-no dependencies, yours to run and adapt.
+MIT licensed — plain markdown, no dependencies, yours to run and adapt.

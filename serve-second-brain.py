@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the portable Second Brain console locally with live reindexing."""
+"""Run the KnoVault console locally with live reindexing."""
 from __future__ import annotations
 
 import argparse
@@ -69,7 +69,7 @@ def find_port(preferred: int) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Serve the Second Brain console locally.")
+    parser = argparse.ArgumentParser(description="Serve the KnoVault console locally.")
     parser.add_argument("--port", type=int, default=8787)
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args()
@@ -77,7 +77,7 @@ def main() -> int:
     port = find_port(args.port)
     server = ThreadingHTTPServer(("127.0.0.1", port), partial(Handler, directory=str(ROOT)))
     url = f"http://127.0.0.1:{port}/index.html"
-    print(f"Second Brain console: {url}")
+    print(f"KnoVault console: {url}")
     print("Refresh rebuilds brain-index.js and reloads this page. Ctrl+C stops the server.")
     if not args.no_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
