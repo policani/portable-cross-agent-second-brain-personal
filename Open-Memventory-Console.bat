@@ -1,5 +1,5 @@
 @echo off
-REM Open the live KnoVault console. Refresh rebuilds the local index and reloads
+REM Open the live Memventory console. Refresh rebuilds the local index and reloads
 REM the same browser page. Close the minimized server window to stop it.
 cd /d "%~dp0"
 
@@ -13,4 +13,4 @@ if not defined PY (
   exit /b 1
 )
 
-start "KnoVault Console" /min %PY% serve-second-brain.py
+start "Memventory Console" /min %PY% serve-second-brain.py

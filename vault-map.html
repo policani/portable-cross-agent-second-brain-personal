@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>KnoVault — Constellation</title>
+<title>Memventory — Constellation</title>
 <style>
   :root{
     --bg:#07090d; --panel:#10141c; --panel2:#161b26; --line:#232a38;
@@ -104,8 +104,8 @@
 <div id="loadmask"><div style="text-align:center"><div class="ring"></div>
   <h2>BUILDING MAP</h2><p>laying out the vault…</p></div></div>
 <div id="buildstatus"></div>
-<div class="brand"><h1><span>◆</span> KNO<span style="color:var(--accent)">VAULT</span></h1>
-  <p id="sub">KnoVault overview</p></div>
+<div class="brand"><h1><span>◆</span> MEM<span style="color:var(--accent)">VENTORY</span></h1>
+  <p id="sub">Your visual second brain</p></div>
 <div id="highlightStatus"><span class="dot"></span><span></span></div>
 <button id="back">◀ Back to overview</button>
 <div id="edgeKey"><b style="color:var(--text)">connections</b>
@@ -174,8 +174,12 @@ let nodes=[], groups=[], links=[], ringNodes=[], folderNodes=[];
 let mode="overview";           // overview | spot
 let spot=null;                 // {center, items:Map(target->rel), edges:[...]}
 let highlightDimension="role", highlightValue=null, highlightFolderCounts=new Map(), highlightStarted=0;
-const ROLE_PALETTE={logic:"#b78cf7",reference:"#6fc3f0",output:"#5fdba8",template:"#f0a12e",office:"#8cf7ea",graphic:"#ff8fb1",media:"#f7a58c",software:"#7c8cf8",archive:"#c9b06f",script:"#f78cd2"};
-const ROLE_LABELS={logic:"AI logic",reference:"Reference",output:"Output",template:"Template",office:"Office",graphic:"Graphics",media:"Media",software:"Software",archive:"Backup",script:"Script"};
+const ROLE_PALETTE={
+  logic:"#b78cf7", reference:"#6fc3f0", output:"#5fdba8", template:"#f0a12e",
+  office:"#8cf7ea", graphic:"#ff8fb1", media:"#f7a58c", software:"#7c8cf8", archive:"#c9b06f", script:"#f78cd2"
+};
+const ROLE_LABELS={logic:"AI logic",reference:"Reference",output:"Output",template:"Template",
+  office:"Office",graphic:"Graphics",media:"Media",software:"Software",archive:"Backup",script:"Script"};
 const FORMAT_HIGHLIGHT=["#f0c94b","#f0714e","#e08ef5","#69d2ff","#83f0c0","#ffb36b","#ff7da6","#aeb8ff"];
 const ROLE_EXT={};
 "py pyw js mjs cjs jsx ts tsx sh bash zsh fish ps1 psm1 vb vbs sql r lua pl pm php java kt kts c cpp cc cxx h hpp cs fs fsx go rs swift rkt scala dart ex exs erl hrl clj cljs groovy gvy gradle tf hcl bicep asm s sv vhd vhdl ipynb json jsonc json5 yaml yml toml ini cfg conf properties env css scss sass less xml xsl xslt".split(" ").forEach(x=>ROLE_EXT[x]="script");
@@ -185,9 +189,21 @@ const ROLE_EXT={};
 "exe msi msp msix msixbundle appx appxbundle appimage deb rpm pkg dmg apk aab ipa jar war ear bin run com gadget".split(" ").forEach(x=>ROLE_EXT[x]="software");
 "zip zipx rar 7z tar gz tgz bz2 xz zst lz lz4 cab arj lha lzh sit sitx dmg iso img vhd vhdx qcow2 bak backup".split(" ").forEach(x=>ROLE_EXT[x]="archive");
 function extOf(path){ const n=fileName(path), i=n.lastIndexOf("."); return i>=0?n.slice(i+1).toLowerCase():"(none)"; }
-function roleOf(f){ if(f.category&&ROLE_PALETTE[f.category]) return f.category; const p=f.path.toLowerCase(), name=fileName(p), ext=extOf(p); if(ROLE_EXT[ext]) return ROLE_EXT[ext]; if(/(^|\/)(examples\/sample-outputs|sample-outputs|generated|indexes)(\/|$)/.test(p)||/\d{4}-\d{2}-\d{2}/.test(name)) return "output"; if(/(^|\/)templates(\/|$)/.test(p)||/_template\.md$|-template\.md$/.test(name)) return "template"; if(["agents.md","claude.md","skill.md"].includes(name)||/(^|\/)(chatgpt-project|workflow|skills)(\/|$)/.test(p)||/(trigger[-_]map|operating[-_]model|handoff[-_]rules|guardrail|runtime|start[-_]here|_prompt\.md$|[-_]prompts?\.md$|routing[-_]rules)/.test(name)) return "logic"; return "reference"; }
+function roleOf(f){
+  if(f.category && ROLE_PALETTE[f.category]) return f.category;
+  const p=f.path.toLowerCase(), name=fileName(p), ext=extOf(p);
+  if(ROLE_EXT[ext]) return ROLE_EXT[ext];
+  if(/(^|\/)(examples\/sample-outputs|sample-outputs|generated|indexes)(\/|$)/.test(p)||/\d{4}-\d{2}-\d{2}/.test(name)) return "output";
+  if(/(^|\/)templates(\/|$)/.test(p)||/_template\.md$|-template\.md$/.test(name)) return "template";
+  if(["agents.md","claude.md","skill.md"].includes(name)||/(^|\/)(chatgpt-project|workflow|skills)(\/|$)/.test(p)||/(trigger[-_]map|operating[-_]model|handoff[-_]rules|guardrail|runtime|start[-_]here|_prompt\.md$|[-_]prompts?\.md$|routing[-_]rules)/.test(name)) return "logic";
+  return "reference";
+}
 function highlightKey(f){ return highlightDimension==="format" ? extOf(f.path) : roleOf(f); }
-function highlightColor(){ if(highlightDimension==="role") return ROLE_PALETTE[highlightValue]||ACCENT; const seed=String(highlightValue||"").split("").reduce((n,c)=>n+c.charCodeAt(0),0); return FORMAT_HIGHLIGHT[seed%FORMAT_HIGHLIGHT.length]||ACCENT; }
+function highlightColor(){
+  if(highlightDimension==="role") return ROLE_PALETTE[highlightValue]||ACCENT;
+  const seed=String(highlightValue||"").split("").reduce((n,c)=>n+c.charCodeAt(0),0);
+  return FORMAT_HIGHLIGHT[seed%FORMAT_HIGHLIGHT.length]||ACCENT;
+}
 function highlightLabel(){ return highlightDimension==="role" ? (ROLE_LABELS[highlightValue]||highlightValue) : "."+highlightValue; }
 const secByFile = {};
 IX.sections.forEach(s=>{ (secByFile[s.file] = secByFile[s.file]||[]).push(s); });
@@ -399,11 +415,24 @@ function addFileNode(f, folder, x, y, instruction=false){
 }
 
 function setHighlight(dimension,value){
-  highlightDimension=dimension==="format" ? "format" : "role"; highlightValue=value||null; highlightStarted=performance.now(); highlightFolderCounts=new Map();
-  if(highlightValue) nodes.forEach(n=>{ if(highlightKey(n.f)!==highlightValue) return; for(let folder=n.folder; folder; folder=folder.parent) highlightFolderCounts.set(folder,(highlightFolderCounts.get(folder)||0)+1); });
+  highlightDimension=dimension==="format" ? "format" : "role";
+  highlightValue=value||null;
+  highlightStarted=performance.now();
+  highlightFolderCounts=new Map();
+  if(highlightValue){
+    nodes.forEach(n=>{
+      if(highlightKey(n.f)!==highlightValue) return;
+      for(let folder=n.folder; folder; folder=folder.parent)
+        highlightFolderCounts.set(folder,(highlightFolderCounts.get(folder)||0)+1);
+    });
+  }
   const status=document.getElementById("highlightStatus");
-  if(highlightValue){ status.style.display="flex"; const dot=status.querySelector(".dot"); dot.style.background=highlightColor(); dot.style.color=highlightColor(); status.querySelector("span:last-child").textContent=highlightLabel()+" highlighted · folder markers show matching locations"; }
-  else status.style.display="none";
+  if(highlightValue){
+    status.style.display="flex";
+    const dot=status.querySelector(".dot");
+    dot.style.background=highlightColor(); dot.style.color=highlightColor();
+    status.querySelector("span:last-child").textContent=highlightLabel()+" highlighted · folder markers show matching locations";
+  }else status.style.display="none";
   requestDraw();
 }
 
@@ -1296,7 +1325,11 @@ function drawBase(alpha){
     const r=Math.max(5, f.r*cam.s*(f.parent?0.72:0.9));
     drawFolder(sx,sy,r,f.color,hot,!f.parent);
     const matchingHere=highlightValue ? (highlightFolderCounts.get(f)||0) : 0;
-    if(matchingHere){ const hc=highlightColor(), pulse=0.55+0.25*Math.sin((performance.now()-highlightStarted)/260); ctx.beginPath(); ctx.arc(sx,sy,r+5+pulse*3,0,2*Math.PI); ctx.strokeStyle=hc; ctx.globalAlpha=alpha*a*(0.55+pulse*0.3); ctx.lineWidth=1.5; ctx.stroke(); }
+    if(matchingHere){
+      const hc=highlightColor(), pulse=0.55+0.25*Math.sin((performance.now()-highlightStarted)/260);
+      ctx.beginPath(); ctx.arc(sx,sy,r+5+pulse*3,0,2*Math.PI);
+      ctx.strokeStyle=hc; ctx.globalAlpha=alpha*a*(0.55+pulse*0.3); ctx.lineWidth=1.5; ctx.stroke();
+    }
     if(selectedFolder===f){
       ctx.beginPath(); ctx.arc(sx,sy,r+8,0,2*Math.PI);
       ctx.strokeStyle=ACCENT; ctx.lineWidth=1.2; ctx.stroke();
@@ -1336,7 +1369,12 @@ function drawBase(alpha){
     const dimmed=(query&&mode==="overview"&&!hit) || (highlightValue&&!roleMatch);
     const r=Math.max(n.instruction?2.6:1.1, n.r*cam.s)*(hit||roleMatch?1.6:1)*(n.instruction?1.22:1);
     ctx.globalAlpha=alpha*a*(highlightValue?(roleMatch?1:0.16):1);
-    if(roleMatch){ const hc=highlightColor(), pulse=0.55+0.3*Math.sin((performance.now()-highlightStarted)/230); ctx.beginPath(); ctx.arc(sx,sy,r+7+pulse*5,0,2*Math.PI); ctx.strokeStyle=hc; ctx.globalAlpha=alpha*a*(0.24+pulse*0.18); ctx.lineWidth=1.3; ctx.stroke(); ctx.globalAlpha=alpha*a; }
+    if(roleMatch){
+      const hc=highlightColor(), pulse=0.55+0.3*Math.sin((performance.now()-highlightStarted)/230);
+      ctx.beginPath(); ctx.arc(sx,sy,r+7+pulse*5,0,2*Math.PI);
+      ctx.strokeStyle=hc; ctx.globalAlpha=alpha*a*(0.24+pulse*0.18); ctx.lineWidth=1.3; ctx.stroke();
+      ctx.globalAlpha=alpha*a;
+    }
     ctx.beginPath(); ctx.arc(sx,sy,r,0,2*Math.PI);
     if(dimmed) ctx.fillStyle="rgba(120,128,145,0.18)";
     else if(roleMatch) ctx.fillStyle=highlightColor();
@@ -1727,7 +1765,10 @@ document.getElementById("censusToggle").addEventListener("change", e=>{
   if(mode==="spot") exitSpot();
   buildGraph(); setHighlight(highlightDimension,highlightValue); requestDraw();
 });
-addEventListener("message",e=>{ const d=e.data; if(d&&d.type==="vault-map-highlight") setHighlight(d.dimension,d.value); });
+addEventListener("message",e=>{
+  const d=e.data;
+  if(d&&d.type==="vault-map-highlight") setHighlight(d.dimension,d.value);
+});
 
 requestAnimationFrame(()=>{      // let the loading mask paint before we build
   buildGraph();
