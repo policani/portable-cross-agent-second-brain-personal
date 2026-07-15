@@ -51,8 +51,8 @@ Configuration (optional)
 * ``scan_dirs`` (relative to ``vault_root``): where markdown *content* is
   indexed for retrieval. Defaults to the well-known vault layouts below.
 * ``census`` (default false): when true, every file of every type under
-  ``vault_root``'s child folders is listed (name/size only, content not
-  read) so ``vault-map.html`` shows the whole workspace, not just the
+  ``vault_root`` (including loose root-level files) is listed (name/size
+  only, content not read) so ``vault-map.html`` shows the whole workspace, not just the
   indexed markdown. Census entries cost no retrieval tokens.
 * ``exclude``: folder/file names to skip everywhere, merged with the
   defaults (node_modules, .git, __pycache__, build outputs, legacy-*).
@@ -108,8 +108,9 @@ MAX_CENSUS = 60_000          # hard cap on census entries
 MAX_REFS = 40                # per-file cap on outbound relationships
 TOP_N = 3
 
-# File taxonomy used by the console and map. Markdown files are refined by
-# path/name below; binary and structured formats classify by extension first.
+# File taxonomy used by the console and map.  Markdown files are refined by
+# their path/name below; binary and structured formats are unambiguous enough
+# to classify by extension first.
 SCRIPT_EXT = frozenset("py pyw js mjs cjs jsx ts tsx sh bash zsh fish ps1 psm1 vb vbs sql r lua pl pm php java kt kts c cpp cc cxx h hpp cs fs fsx go rs swift rkt scala dart ex exs erl hrl clj cljs groovy gvy gradle make cmake dockerfile tf hcl bicep asm s sv vhd vhdl ipynb json jsonc json5 yaml yml toml ini cfg conf properties env css scss sass less xml xsl xslt".split())
 OFFICE_EXT = frozenset("doc docx docm dot dotx odt rtf pdf xls xlsx xlsm xlsb ods csv tsv ppt pptx pptm pps ppsx odp pub vsd vsdx one".split())
 GRAPHIC_EXT = frozenset("png apng jpg jpeg jpe gif bmp dib webp tif tiff heic heif avif ico cur svg ai eps ps psd psb xcf kra ora sketch fig".split())
@@ -184,16 +185,27 @@ def tokenize(text: str) -> list[str]:
 def file_category(path: Path, rel: str) -> str:
     """Return the console category for a workspace file."""
     ext = path.suffix.lower().lstrip(".")
-    if ext in SCRIPT_EXT: return "script"
-    if ext in OFFICE_EXT: return "office"
-    if ext in GRAPHIC_EXT: return "graphic"
-    if ext in MEDIA_EXT: return "media"
-    if ext in SOFTWARE_EXT: return "software"
-    if ext in ARCHIVE_EXT: return "archive"
+    if ext in SCRIPT_EXT:
+        return "script"
+    if ext in OFFICE_EXT:
+        return "office"
+    if ext in GRAPHIC_EXT:
+        return "graphic"
+    if ext in MEDIA_EXT:
+        return "media"
+    if ext in SOFTWARE_EXT:
+        return "software"
+    if ext in ARCHIVE_EXT:
+        return "archive"
     p, name = rel.lower(), path.name.lower()
-    if re.search(r"(^|/)(examples/sample-outputs|sample-outputs|generated|indexes)(/|$)", p) or re.search(r"\d{4}-\d{2}-\d{2}", name): return "output"
-    if re.search(r"(^|/)templates(/|$)", p) or re.search(r"_template\.md$|-template\.md$", name): return "template"
-    if (name in {"agents.md", "claude.md", "skill.md", "instructions.md"} or re.search(r"(^|/)(chatgpt-project|workflow|skills)(/|$)", p) or re.search(r"trigger[-_]map|operating[-_]model|handoff[-_]rules|guardrail|runtime|start[-_]here|_prompt\.md$|[-_]prompts?\.md$|routing[-_]rules", name)): return "logic"
+    if re.search(r"(^|/)(examples/sample-outputs|sample-outputs|generated|indexes)(/|$)", p) or re.search(r"\d{4}-\d{2}-\d{2}", name):
+        return "output"
+    if re.search(r"(^|/)templates(/|$)", p) or re.search(r"_template\.md$|-template\.md$", name):
+        return "template"
+    if (name in {"agents.md", "claude.md", "skill.md", "instructions.md"}
+            or re.search(r"(^|/)(chatgpt-project|workflow|skills)(/|$)", p)
+            or re.search(r"trigger[-_]map|operating[-_]model|handoff[-_]rules|guardrail|runtime|start[-_]here|_prompt\.md$|[-_]prompts?\.md$|routing[-_]rules", name)):
+        return "logic"
     return "reference"
 
 

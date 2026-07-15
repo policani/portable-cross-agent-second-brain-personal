@@ -1,16 +1,16 @@
-# KnoVault — Personal
+# Memventory — Personal
 
-KnoVault is a plain-markdown second brain for **one person**, working the same in **Claude,
-Codex, and Cursor** through two instruction files. It routes to the note it needs
-instead of loading everything, so it **saves tokens** — and because you're the
-only user, there's no approval queue: the AI drafts straight into your notes and
-you edit or prune in place.
+Memventory is a structured, visual second brain for **one person**: a portable
+plain-markdown wiki that works the same in **Claude, Codex, and Cursor**. It
+routes to the note it needs instead of loading everything, so it **saves tokens**
+— and because you're the only user, there's no approval queue: the AI drafts
+straight into your notes and you edit or prune in place.
 
 No database. No vectors. No Obsidian. No lock-in. Clone it, fill in seven notes,
 point any of three agents at it, and your AI stops forgetting who you are between
 sessions.
 
-![KnoVault constellation, personal edition: your notes and projects as dot clusters inside rings of skills, routines, and connected applications — select a note to see its connections](assets/vault-map-personal.svg)
+![Memventory constellation, personal edition: your notes and projects as dot clusters inside rings of skills, routines, and connected applications — select a note to see its connections](assets/vault-map-personal.svg)
 
 *The bundled `vault-map.html` renders your vault like this — open it straight
 from the folder, no server, no build step. Click any note to spotlight what
@@ -20,9 +20,9 @@ links to it and what it links to.*
 > gate so shared memory stays trustworthy when more than one person (and their
 > agents) write to it.
 
-## Management Console
+## Visual Console and Wiki
 
-Open **`Open-KnoVault-Console.bat`** to launch the browser console with a
+Open **`Open-Memventory-Console.bat`** to launch the browser console with a
 local-only helper. Its **Refresh** button rebuilds `brain-index.js` and reloads
 the same page, with a timestamp down to the second. The constellation's search
 and display controls can be tucked away with the × button and restored with ☰.
@@ -113,7 +113,7 @@ brain.py                deterministic retrieval: index + query, no dependencies
 index.html              Management Console — Constellation, Types, Sizes, Table
 vault-map.html          interactive vault map, opens from the filesystem
 serve-second-brain.py   localhost-only helper for live console refreshes
-Open-KnoVault-Console.bat     one-click launcher for the live console
+Open-Memventory-Console.bat   one-click launcher for the live console
 INSTALL.md              setup for Claude, Codex, and Cursor
 ```
 

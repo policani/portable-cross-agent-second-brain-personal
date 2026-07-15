@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>KnoVault — Console</title>
+<title>Memventory — Second Brain Console</title>
 <style>
   :root{
     --bg:#0b0e14; --bg2:#0e131b; --panel:#111721; --panel2:#161d29;
@@ -168,7 +168,7 @@
 </head>
 <body>
 <header>
-  <div class="brand"><b><span class="mark">◆</span> KNO<span style="color:var(--accent)">VAULT</span></b><span id="rootname">console</span></div>
+  <div class="brand"><b><span class="mark">◆</span> MEM<span style="color:var(--accent)">VENTORY</span></b><span id="rootname">console</span></div>
   <div class="kpis" id="kpis"></div>
   <button class="refreshbtn" id="refresh" type="button">⟳ Refresh</button>
   <div class="gen" id="gen"></div>
@@ -206,7 +206,7 @@ document.write('<script src="brain-index.js?t='+Date.now()+'"><\/script>');
 <script>
 "use strict";
 /* ============================================================= *
- *  KnoVault — Console.  A dashboard shell over the same
+ *  Memventory — Second Brain Console. A dashboard shell over the same
  *  window.BRAIN_INDEX the petri-dish map uses.  Focus: file
  *  management by ROLE and FORMAT (size, count, type), with the
  *  Constellation (petri dish) as the prominent default view.
@@ -214,9 +214,9 @@ document.write('<script src="brain-index.js?t='+Date.now()+'"><\/script>');
 const SAMPLE = {
   root_name:"Sample", root_rel:"../", generated:"2026-07-11T08:51:21", n_sections:6,
   files:[
-    {path:"AGENTS.md",dir:"(root)",sections:6,summary:"Agent instructions",bytes:40623,indexed:true,links:["llm-wiki/wiki/home"]},
+    {path:"AGENTS.md",dir:"(root)",sections:6,summary:"Agent instructions",bytes:40623,indexed:true,links:["knowledge-base/snapshot.md"]},
     {path:"brain.py",dir:"(root)",sections:0,summary:"",bytes:22000,indexed:false,links:[]},
-    {path:"llm-wiki/wiki/home.md",dir:"llm-wiki/wiki",sections:3,summary:"Wiki home",bytes:8200,indexed:true,links:[]},
+    {path:"knowledge-base/snapshot.md",dir:"knowledge-base",sections:3,summary:"Memory snapshot",bytes:8200,indexed:true,links:[]},
     {path:"products/x/CLAUDE.md",dir:"products/x",sections:1,summary:"Governance",bytes:2200,indexed:true,links:[]},
     {path:"products/x/templates/intake_template.md",dir:"products/x/templates",sections:2,summary:"Template",bytes:5100,indexed:true,links:[]},
     {path:"products/x/examples/sample-outputs/report.md",dir:"products/x/examples/sample-outputs",sections:2,summary:"Generated output",bytes:15400,indexed:true,links:[]},
@@ -273,7 +273,7 @@ function roleOf(f){
   const p=f.path.toLowerCase(), name=fileName(p), ext=extOf(p);
   if(EXT_ROLE[ext]) return EXT_ROLE[ext];               // binaries & code win by extension
   if(/(^|\/)(examples\/sample-outputs|sample-outputs|generated)(\/|$)/.test(p)) return "output";
-  if(/(^|\/)(llm-wiki\/indexes|thought-leadership\/04-indexes|indexes)(\/|$)/.test(p)) return "output";
+  if(/(^|\/)(indexes)(\/|$)/.test(p)) return "output";
   if(/\d{4}-\d{2}-\d{2}/.test(name)) return "output";
   if(/(^|\/)templates(\/|$)/.test(p) || /_template\.md$|-template\.md$/.test(name)) return "template";
   if(["agents.md","claude.md","skill.md"].includes(name)) return "logic";
@@ -765,10 +765,10 @@ renderAll();
   const served=location.protocol==="http:"||location.protocol==="https:";
   btn.title=served
     ? "Rebuild the index and reload this console."
-    : "Open Open-KnoVault-Console.bat to refresh this page automatically.";
+    : "Open Open-Memventory-Console.bat to refresh this page automatically.";
   btn.onclick=async()=>{
     if(!served){
-      alert("For a live rebuild and same-page reload, open Open-KnoVault-Console.bat.\n\nYou can also run: python brain.py --index");
+      alert("For a live rebuild and same-page reload, open Open-Memventory-Console.bat.\n\nYou can also run: python brain.py --index");
       return;
     }
     const original=btn.textContent; btn.textContent="⟳ Reindexing…"; btn.disabled=true;
