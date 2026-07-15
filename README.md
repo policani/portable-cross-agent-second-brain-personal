@@ -10,11 +10,11 @@ No database. No vectors. No Obsidian. No lock-in. Clone it, fill in seven notes,
 point any of three agents at it, and your AI stops forgetting who you are between
 sessions.
 
-![Memventory constellation, personal edition: your notes and projects as dot clusters inside rings of skills, routines, and connected applications — select a note to see its connections](assets/vault-map-personal.svg)
+![Memventory Personal Management Console showing vault metrics, a searchable folder rail, the live constellation map, and an inspection panel](assets/memventory-personal-console.png)
 
-*The bundled `vault-map.html` renders your vault like this — open it straight
-from the folder, no server, no build step. Click any note to spotlight what
-links to it and what it links to.*
+*The bundled Management Console renders your vault like this. Open `index.html`
+through the included launcher to search files, browse folder regions, switch
+views, and inspect the live constellation.*
 
 > **Working with a team?** Use the Team edition, which adds a propose-then-approve
 > gate so shared memory stays trustworthy when more than one person (and their
