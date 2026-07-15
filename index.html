@@ -34,6 +34,7 @@
   .brand span{color:var(--dim);font-size:11px;letter-spacing:.06em}
   .kpis{display:flex;gap:8px;flex:1;overflow-x:auto;padding-bottom:1px}
   .kpi{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 11px;min-width:66px;flex:none}
+  button.kpi{color:var(--text);font:inherit;text-align:left;cursor:pointer}
   .kpi .v{font-size:16px;font-weight:600;line-height:1.1}
   .kpi .l{font-size:10px;color:var(--dim);letter-spacing:.04em;text-transform:uppercase;margin-top:2px;display:flex;align-items:center;gap:5px}
   .kpi .l .sw{width:8px;height:8px;border-radius:2px}
@@ -42,6 +43,8 @@
   .gen{font-size:10px;color:var(--dim2);white-space:nowrap;text-align:right}
 
   main{flex:1;display:grid;grid-template-columns:240px 1fr 330px;min-height:0}
+  main.inspcollapsed{grid-template-columns:240px 1fr 0}
+  main.inspcollapsed .inspector{display:none}
   .rail,.inspector{background:var(--bg2);overflow:auto;min-height:0}
   .rail{border-right:1px solid var(--line)} .inspector{border-left:1px solid var(--line)}
   .center{display:flex;flex-direction:column;min-width:0;min-height:0}
@@ -54,6 +57,8 @@
   .toggle{display:flex;margin:2px 12px 4px;background:var(--panel);border:1px solid var(--line);border-radius:7px;overflow:hidden}
   .toggle button{flex:1;background:transparent;border:0;color:var(--dim);padding:6px 0;font-size:11.5px;letter-spacing:.03em}
   .toggle button.on{background:var(--sel);color:var(--text)}
+  .dimhint{margin:5px 14px 2px;color:var(--dim2);font-size:10.5px;line-height:1.35}
+  .railnote{margin:0 14px 4px;color:var(--dim2);font-size:10.5px;line-height:1.35}
   .lens{display:flex;align-items:center;gap:8px;padding:6px 14px;color:var(--dim);font-size:12.5px;cursor:pointer;border-left:2px solid transparent}
   .lens:hover{background:var(--rowhover);color:var(--text)}
   .lens.on{background:var(--sel);color:var(--text);border-left-color:var(--accent)}
@@ -72,6 +77,9 @@
   .crumbs{font-size:12px;color:var(--dim);flex:1;min-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .crumbs b{color:var(--text);font-weight:600}
   .crumbs .clear{color:var(--accent);cursor:pointer;margin-left:8px}
+  .iconbtn{background:var(--panel);border:1px solid var(--line);color:var(--dim);border-radius:8px;padding:6px 10px;font-size:13px;line-height:1;flex:none}
+  .iconbtn:hover{border-color:var(--accent);color:var(--text)}
+  .iconbtn.on{border-color:var(--accent);color:var(--text)}
   .seg{display:flex;background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden;flex:none}
   .seg button{background:transparent;border:0;color:var(--dim);padding:6px 14px;font-size:12px;border-left:1px solid var(--line)}
   .seg button:first-child{border-left:0}
@@ -176,22 +184,25 @@
 <main>
   <nav class="rail">
     <div class="search"><input type="search" id="search" placeholder="Search files…" autocomplete="off"></div>
-    <div class="grouplabel">Color / group by</div>
+    <div class="grouplabel" id="dimLabel">Map color &amp; highlight</div>
     <div class="toggle" id="dimToggle">
       <button data-d="role" class="on">Role</button>
       <button data-d="format">Format</button>
     </div>
+    <div class="dimhint" id="dimHint"></div>
     <div class="grouplabel" id="typesLabel">File roles</div>
     <div id="types"></div>
     <div class="grouplabel">Folders</div>
     <div class="tree" id="tree"></div>
-    <div class="grouplabel">Arms</div>
+    <div class="grouplabel">Constellation overlays</div>
+    <div class="railnote">Focus an outer ring on the map. Click the active overlay again to clear it.</div>
     <div id="arms"></div>
   </nav>
   <section class="center">
     <div class="toolbar">
       <div class="crumbs" id="crumbs"></div>
       <div class="seg" id="modeSeg"></div>
+      <button class="iconbtn" id="inspToggle" title="Show or hide the inspector panel">⟩</button>
     </div>
     <div class="canvaswrap" id="stage"></div>
   </section>
@@ -317,7 +328,7 @@ function typeGroups(set){
 }
 
 /* ---------- state ---------- */
-const S={ q:"", dim:"role", type:null, highlight:null, folder:"", sort:"path", dir:1, mode:"constellation", sel:null, colFilter:{} };
+const S={ q:"", dim:"role", type:null, highlight:null, folder:"", sort:"path", dir:1, mode:"constellation", sel:null, inspectorOpen:false, colFilter:{} };
 
 /* value a file shows in a given table column — used for Excel-style filtering */
 function colVal(f,k){
@@ -362,16 +373,20 @@ function renderHeader(){
     "<br>"+files.length+" files · "+kb(totB)+(DEMO?" · <b style='color:var(--warn)'>sample</b>":"");
   const groups=typeGroups(files);
   const wrap=$("#kpis"); wrap.innerHTML="";
-  const mk=(v,l,cls,sw,onClick,on,tip)=>{ const d=el("div","kpi"+(onClick?" click":"")+(on?" on":""));
+  const mk=(v,l,cls,sw,onClick,on,tip)=>{ const d=el(onClick?"button":"div","kpi"+(onClick?" click":"")+(on?" on":""));
+    if(onClick) d.type="button";
     d.innerHTML=`<div class="v ${cls||''}">${v}</div><div class="l">${sw?`<span class="sw" style="background:${sw}"></span>`:''}${l}</div>`;
-    if(onClick){ d.title=(tip?tip+" ":"")+`Click to highlight ${l} locations on the constellation map`; d.onclick=onClick; }
+    if(onClick){ d.title=tip||""; d.onclick=onClick; }
     wrap.appendChild(d); };
-  mk(files.length,"files");
+  const mapMode=S.mode==="constellation";
+  mk(files.length,"files","","",()=>clearHeaderFilter(),mapMode?S.highlight==null:S.type==null,
+    mapMode?"Clear the highlighted category.":"Clear the active category filter.");
   mk(kb(totB),"size");
   groups.forEach(g=>{
     mk(g.items.length, esc(dimLabel(g.key)), "", dimHexOf(g.key),
-      ()=>toggleHighlight(S.highlight===g.key?null:g.key), S.highlight===g.key,
-      S.dim==="role"&&ROLES[g.key]?ROLES[g.key].desc:"");
+      ()=>activateHeaderGroup(g.key), mapMode?S.highlight===g.key:S.type===g.key,
+      (S.dim==="role"&&ROLES[g.key]?ROLES[g.key].desc+" ":"")+
+        (mapMode?`Click to highlight ${dimLabel(g.key)} locations on the map.`:`Click to filter this view to ${dimLabel(g.key)}.`));
   });
 }
 
@@ -391,6 +406,17 @@ function renderTypeRail(){
     d.onclick=()=>setType(S.type===g.key?null:g.key);
     wrap.appendChild(d);
   });
+}
+function renderDimensionControls(){
+  const label=$("#dimLabel"), hint=$("#dimHint");
+  if(!label||!hint) return;
+  const copy={
+    constellation:["Map color & highlight","Role or format sets the map colors. Choose an item below to highlight every matching location."],
+    types:["Group & color by","Switch the categories used in this breakdown. Choose an item below to filter the view."],
+    sizes:["Color by","Tiles stay grouped by folder; role or format changes their colors. Choose an item below to filter."],
+    table:["Category colors","Role or format changes file-dot colors and the category filters listed below."]
+  }[S.mode]||["Color by","Choose how files are categorized and colored."];
+  label.textContent=copy[0]; hint.textContent=copy[1];
 }
 let treeRoots=[], expanded=new Set([""]);
 function buildTree(){
@@ -423,7 +449,7 @@ function renderArms(){
   .forEach(([k,label,color])=>{ const items=arms[k]||[]; if(!items.length) return;
     const d=el("div","lens"+(S.sel&&S.sel.kind==="arm"&&S.sel.ref===k?" on":""));
     d.innerHTML=`<span class="swatch" style="background:${color}"></span><span>${label}</span><span class="c">${items.length}</span>`;
-    d.onclick=()=>{ S.sel={kind:"arm",ref:k}; renderInspector(); renderArms(); };
+    d.onclick=()=>selectArm(k);
     wrap.appendChild(d); });
 }
 
@@ -435,7 +461,8 @@ function renderModeSeg(){
   const seg=$("#modeSeg"); seg.innerHTML="";
   VIEWS.forEach(v=>{ const b=el("button"); b.textContent=v.label; if(v.hero) b.classList.add("hero");
     if(S.mode===v.id) b.classList.add("on");
-    b.onclick=()=>{ S.mode=v.id; renderModeSeg(); renderCrumbs(); renderCenter(); }; seg.appendChild(b); });
+    b.onclick=()=>{ S.mode=v.id;
+      renderModeSeg(); renderDimensionControls(); renderTypeRail(); renderHeader(); renderCrumbs(); renderCenter(); }; seg.appendChild(b); });
 }
 function renderCrumbs(){
   if(!viewById(S.mode).filters){
@@ -458,12 +485,28 @@ function renderCrumbs(){
 
 /* ---- Constellation (petri dish, hero default) ---- */
 let constellationFrame=null;
-function sendConstellationHighlight(){ if(constellationFrame&&constellationFrame.contentWindow) constellationFrame.contentWindow.postMessage({type:"vault-map-highlight",dimension:S.dim,value:S.highlight},"*"); }
+function sendConstellationHighlight(){
+  if(constellationFrame&&constellationFrame.contentWindow)
+    constellationFrame.contentWindow.postMessage({type:"vault-map-highlight",dimension:S.dim,value:S.highlight},"*");
+}
+function sendConstellationSelection(){
+  if(!constellationFrame||!constellationFrame.contentWindow) return;
+  let selection=null;
+  if(S.folder) selection={kind:"folder",path:S.folder};
+  else if(S.sel&&S.sel.kind==="arm") selection={kind:"arm",key:S.sel.ref};
+  else if(S.sel&&S.sel.kind==="file") selection={kind:"file",path:S.sel.ref};
+  constellationFrame.contentWindow.postMessage({type:"vault-map-selection",selection},"*");
+}
+function syncConstellation(){
+  if(constellationFrame&&constellationFrame.contentWindow)
+    constellationFrame.contentWindow.postMessage({type:"vault-map-host-capabilities",propertiesPanel:true},"*");
+  sendConstellationHighlight(); sendConstellationSelection();
+}
 function renderConstellation(){
   const stage=$("#stage");
-  if(!constellationFrame){ constellationFrame=document.createElement("iframe"); constellationFrame.title="Constellation"; constellationFrame.src="vault-map.html"; constellationFrame.style.cssText="width:100%;height:100%;border:0;display:block;background:#07090d"; constellationFrame.onload=sendConstellationHighlight; }
+  if(!constellationFrame){ constellationFrame=document.createElement("iframe"); constellationFrame.title="Constellation"; constellationFrame.src="vault-map.html"; constellationFrame.style.cssText="width:100%;height:100%;border:0;display:block;background:#07090d"; constellationFrame.onload=syncConstellation; }
   if(!stage.contains(constellationFrame)){ stage.innerHTML=""; stage.appendChild(constellationFrame); }
-  sendConstellationHighlight();
+  syncConstellation();
 }
 
 /* ---- Types: counts + sizes per role/format ---- */
@@ -493,7 +536,7 @@ function renderTypes2(){
     rows+
     `<div style="font-size:11px;color:var(--dim2);margin-top:12px">Click a ${S.dim} to filter · toggle Role / Format in the left rail</div>`+
   `</div>`;
-  stage.querySelectorAll(".trow").forEach(r=>r.onclick=()=>{ setType(r.getAttribute("data-type")); S.mode="table"; renderModeSeg(); renderCrumbs(); renderCenter(); });
+  stage.querySelectorAll(".trow").forEach(r=>r.onclick=()=>{ setType(r.getAttribute("data-type")); S.mode="table"; renderModeSeg(); renderDimensionControls(); renderTypeRail(); renderHeader(); renderCrumbs(); renderCenter(); });
 }
 
 /* squarified treemap (Bruls, Huizing, van Wijk) — good aspect ratios, no overlap */
@@ -675,12 +718,46 @@ function openColMenu(key, th){
 /* ============================================================= *
  *  INSPECTOR
  * ============================================================= */
-function selectFile(path){ S.sel={kind:"file",ref:path}; renderInspector(); if(S.mode==="table") renderTable(); }
+function syncInspectorState(){
+  const open=S.inspectorOpen, main=document.querySelector("main"), toggle=$("#inspToggle");
+  main.classList.toggle("inspcollapsed",!open);
+  toggle.textContent=open?"⟩":"⟨";
+  toggle.classList.toggle("on",!open);
+}
+function selectFile(path,fromMap=false){
+  if(S.sel&&S.sel.kind==="file"&&S.sel.ref===path){ closeInspector(); return; }
+  S.sel={kind:"file",ref:path}; S.inspectorOpen=true; syncInspectorState(); renderInspector();
+  if(S.mode==="table") renderTable();
+  if(S.mode==="constellation"&&!fromMap) sendConstellationSelection();
+}
+function selectArm(key){
+  if(S.mode==="constellation"&&S.sel&&S.sel.kind==="arm"&&S.sel.ref===key){ closeInspector(); return; }
+  S.mode="constellation"; S.folder=""; S.sel={kind:"arm",ref:key}; S.inspectorOpen=true; syncInspectorState();
+  renderModeSeg(); renderDimensionControls(); renderTypeRail(); renderHeader();
+  renderInspector(); renderArms(); renderTree(); renderCrumbs(); renderCenter();
+}
 function renderInspector(){
   const box=$(".inspector");
   if(!S.sel){ box.innerHTML=`<div class="insp-empty">Select a file or type to inspect.</div>`; return; }
   if(S.sel.kind==="file") return renderFileInspector(byPath[S.sel.ref]);
   if(S.sel.kind==="arm") return renderArmInspector(S.sel.ref);
+  if(S.sel.kind==="folder") return renderFolderInspector(S.sel.ref);
+}
+function renderFolderInspector(path){
+  const box=$(".inspector");
+  const items=files.filter(f=>path ? f.path===path||f.path.startsWith(path+"/") : true);
+  const label=path||"All files";
+  box.innerHTML=`<div class="insp"><span class="x" id="ix">✕</span>
+    <h2>📁 ${esc(label)}</h2>
+    <div class="type"><span class="chip">${items.length} file${items.length===1?"":"s"}</span></div>
+    <div class="sum">Showing the files in this folder in the current view.</div>
+  </div>`;
+  $("#ix").onclick=closeInspector;
+}
+function closeInspector(){
+  S.sel=null; S.inspectorOpen=false; syncInspectorState(); renderInspector(); renderArms(); renderTree();
+  if(S.mode==="table") renderTable();
+  if(S.mode==="constellation") sendConstellationSelection();
 }
 function renderFileInspector(f){
   if(!f) return;
@@ -713,7 +790,7 @@ function renderFileInspector(f){
     ${secs?`<div class="seclabel">Sections</div><ul class="seclist">${secs}</ul>`:""}
     <a class="open" href="${href}" target="_blank">Open file ↗</a>
   </div>`;
-  $("#ix").onclick=()=>{ S.sel=null; renderInspector(); if(S.mode==="table") renderTable(); };
+  $("#ix").onclick=closeInspector;
   box.querySelectorAll(".reflist li").forEach(li=>{ const p=li.getAttribute("data-path");
     if(li.getAttribute("data-exists")==="true"||(p&&byPath[p])) li.onclick=()=>selectFile(p); });
 }
@@ -733,7 +810,7 @@ function renderArmInspector(key){
     <div class="type"><span class="chip">${items.length} item${items.length===1?"":"s"}</span></div>
     <div class="sum">${meta.desc}</div>
     <ul class="reflist" style="margin-top:6px">${rows||'<li style="color:var(--dim2)">None recorded.</li>'}</ul></div>`;
-  $("#ix").onclick=()=>{ S.sel=null; renderInspector(); };
+  $("#ix").onclick=closeInspector;
   if(key==="agents") box.querySelectorAll(".reflist li").forEach(li=>{ const p=li.getAttribute("data-path"); if(p&&byPath[p]) li.onclick=()=>selectFile(p); });
 }
 
@@ -741,12 +818,27 @@ function renderArmInspector(key){
  *  ORCHESTRATION
  * ============================================================= */
 function toggleHighlight(v){ S.highlight=v; renderTypeRail(); renderHeader(); renderCrumbs(); if(S.mode==="constellation") sendConstellationHighlight(); }
+function activateHeaderGroup(v){
+  if(S.mode==="constellation") return toggleHighlight(S.highlight===v?null:v);
+  S.type=S.type===v?null:v;
+  renderModeSeg(); renderDimensionControls(); renderTypeRail(); renderHeader(); renderCrumbs(); renderCenter();
+}
+function clearHeaderFilter(){
+  if(S.mode==="constellation") return toggleHighlight(null);
+  S.type=null;
+  renderModeSeg(); renderDimensionControls(); renderTypeRail(); renderHeader(); renderCrumbs(); renderCenter();
+}
 function setType(v){ if(S.mode==="constellation"){ toggleHighlight(S.highlight===v?null:v); return; } S.type=v; renderTypeRail(); renderHeader(); renderCrumbs(); renderCenter(); }
-function setFolder(p){ S.folder=(S.folder===p&&p!=="")?"":p; renderTree(); renderTypeRail(); renderHeader(); renderCrumbs(); renderCenter(); }
+function setFolder(p){
+  S.folder=(S.folder===p&&p!=="")?"":p;
+  S.sel=S.folder?{kind:"folder",ref:S.folder}:null;
+  S.inspectorOpen=!!S.folder;
+  syncInspectorState(); renderTree(); renderTypeRail(); renderHeader(); renderCrumbs(); renderCenter(); renderInspector();
+}
 function setDim(d){ if(S.dim===d) return; S.dim=d; S.type=null; S.highlight=null;
   document.querySelectorAll("#dimToggle button").forEach(b=>b.classList.toggle("on",b.dataset.d===d));
-  renderTypeRail(); renderHeader(); renderCrumbs(); renderCenter(); }
-function renderAll(){ renderHeader(); renderModeSeg(); renderTypeRail(); renderTree(); renderArms(); renderCrumbs(); renderCenter(); renderInspector(); }
+  renderTypeRail(); renderDimensionControls(); renderHeader(); renderCrumbs(); renderCenter(); }
+function renderAll(){ syncInspectorState(); renderHeader(); renderModeSeg(); renderDimensionControls(); renderTypeRail(); renderTree(); renderArms(); renderCrumbs(); renderCenter(); renderInspector(); }
 
 /* alias: registry points renderTypes at the center Types view */
 function renderTypes(){ return renderTypes2(); }
@@ -754,7 +846,27 @@ function renderTypes(){ return renderTypes2(); }
 /* events */
 $("#search").addEventListener("input",e=>{ S.q=e.target.value.trim(); renderTypeRail(); renderHeader(); renderCrumbs(); renderCenter(); });
 $("#dimToggle").addEventListener("click",e=>{ const b=e.target.closest("button"); if(b) setDim(b.dataset.d); });
-addEventListener("message",e=>{ if(e.data&&e.data.type==="vault-map-ready") sendConstellationHighlight(); });
+$("#inspToggle").onclick=()=>{ S.inspectorOpen=!S.inspectorOpen; syncInspectorState(); };
+addEventListener("message",e=>{
+  if(!e.data) return;
+  const fromConstellation=!!(constellationFrame&&e.source===constellationFrame.contentWindow);
+  if((e.data.type==="vault-map-ready"||e.data.type==="vault-map-file-selection"||e.data.type==="vault-map-dismiss")&&!fromConstellation) return;
+  if(e.data.type==="vault-map-ready") syncConstellation();
+  if(e.data.type==="vault-map-file-selection"){
+    if(e.data.path&&byPath[e.data.path]) selectFile(e.data.path,true);
+    else if(S.sel&&S.sel.kind==="file") closeInspector();
+  }
+  if(e.data.type==="vault-map-dismiss"){
+    S.folder="";
+    if(S.inspectorOpen) closeInspector();
+    else { renderTree(); renderTypeRail(); renderHeader(); renderCrumbs(); }
+  }
+});
+document.addEventListener("click",e=>{
+  if(!S.inspectorOpen||e.target.closest(".inspector")) return;
+  if(e.target.closest(".tnode,#arms .lens,tbody tr,.tm-tile,#inspToggle")) return;
+  closeInspector();
+},true);
 let rt; addEventListener("resize",()=>{ clearTimeout(rt); rt=setTimeout(()=>{ if(S.mode==="sizes") renderCenter(); },150); });
 
 /* boot */

@@ -134,7 +134,7 @@
   <p>This map reads <code>brain-index.js</code>, which is generated next to it.<br><br>
   Run <code>python brain.py --index</code> in this folder, then reload.</p>
 </div></div>
-<div id="hint">hover: file name · click a file: select · click a folder: zoom · drag: pan · wheel: zoom</div>
+<div id="hint">hover: file name · click: select · click empty space: clear · drag: pan · wheel: zoom</div>
 <div id="tip"></div>
 <script src="brain-index.js"></script>
 <script>
@@ -173,6 +173,7 @@ let viewMode = "departments", showCensus = true;
 let nodes=[], groups=[], links=[], ringNodes=[], folderNodes=[];
 let mode="overview";           // overview | spot
 let spot=null;                 // {center, items:Map(target->rel), edges:[...]}
+let parentPropertiesPanel=false;
 let highlightDimension="role", highlightValue=null, highlightFolderCounts=new Map(), highlightStarted=0;
 const ROLE_PALETTE={
   logic:"#b78cf7", reference:"#6fc3f0", output:"#5fdba8", template:"#f0a12e",
@@ -434,6 +435,45 @@ function setHighlight(dimension,value){
     status.querySelector("span:last-child").textContent=highlightLabel()+" highlighted · folder markers show matching locations";
   }else status.style.display="none";
   requestDraw();
+}
+
+function applyExternalSelection(selection){
+  if(!selection){
+    if(mode==="spot"||selectedFile||selectedFolder||focusedRing) resetToOverview();
+    return;
+  }
+  if(selection.kind==="folder"){
+    const folder=pathToFolder[selection.path];
+    if(folder&&(selectedFolder!==folder||selectedFile||focusedRing)){
+      zoomFolderNode(folder); hideDetail();
+    }
+    return;
+  }
+  if(selection.kind==="file"){
+    const node=pathToNode[selection.path];
+    if(node&&selectedFile!==node){ focusFileNode(node); hideDetail(); }
+    return;
+  }
+  if(selection.kind==="arm"){
+    const meta={
+      agents:{kind:"agent",label:"Agents"},
+      routines:{kind:"routine",label:"Routines"},
+      applications:{kind:"application",label:"Applications"}
+    }[selection.key];
+    if(!meta) return;
+    if(focusedRing&&focusedRing.kind===meta.kind&&focusedRing.label===meta.label) return;
+    focusRingGroup(meta.kind,meta.label); hideDetail();
+  }
+}
+
+function notifyParentDismiss(){
+  if(window.parent!==window) window.parent.postMessage({type:"vault-map-dismiss"},"*");
+}
+
+function notifyParentFileSelection(){
+  if(window.parent===window||!parentPropertiesPanel) return;
+  window.parent.postMessage({type:"vault-map-file-selection",path:selectedFile?selectedFile.f.path:null},"*");
+  hideDetail();
 }
 
 function rememberBaseLayout(){
@@ -1183,7 +1223,7 @@ function focusRingGroup(kind,label,tool=null){
   }
   selected=null; selectedFolder=null; selectedFile=null;
   resetFocusLayout(800);
-  focusedRing={kind,label,tool};
+  focusedRing={kind,label,tool,group:true};
   const items=ringNodes.filter(r=>r.kind===kind && (!tool || r.tool===tool));
   if(!items.length){ showRingGroupDetail(label,items); setBackVisible(true); return; }
   const xs=items.map(r=>r.x), ys=items.map(r=>r.y);
@@ -1346,13 +1386,20 @@ function drawBase(alpha){
     for(const r of ringNodes){
       const [sx,sy]=toScreen(r.x,r.y);
       r._sx=sx; r._sy=sy;
-      drawShape(sx,sy,Math.max(5,7*cam.s),r.shape,r.color,hover===r);
+      const ringFocused=!!(focusedRing&&focusedRing.kind===r.kind&&
+        (focusedRing.group?(!focusedRing.tool||focusedRing.tool===r.tool):
+          focusedRing.label===r.name&&(!focusedRing.tool||focusedRing.tool===r.tool)));
+      drawShape(sx,sy,Math.max(5,7*cam.s),r.shape,r.color,hover===r||ringFocused);
+      if(ringFocused){
+        ctx.beginPath(); ctx.arc(sx,sy,Math.max(11,14*cam.s),0,2*Math.PI);
+        ctx.strokeStyle=r.color; ctx.globalAlpha=.7; ctx.lineWidth=1.4; ctx.stroke(); ctx.globalAlpha=alpha;
+      }
       if(r.gap){
         ctx.beginPath(); ctx.arc(sx,sy,Math.max(9,11*cam.s),0,2*Math.PI);
         ctx.strokeStyle=ACCENT; ctx.lineWidth=1.2; ctx.stroke();
       }
-      if(mode==="overview" && (cam.s>0.4 || hover===r)){
-        ctx.fillStyle=hover===r? "#fff":DIM;
+      if(mode==="overview" && (cam.s>0.4 || hover===r || ringFocused)){
+        ctx.fillStyle=hover===r||ringFocused? "#fff":DIM;
         ctx.font="10px Segoe UI"; ctx.textAlign="center";
         ctx.fillText(r.name,sx,sy+16);
       }
@@ -1587,21 +1634,22 @@ canvas.addEventListener("click", e=>{
   if(mode==="spot"){
     const centerClick=isNearSpotCenter(e.clientX,e.clientY) || p===spot.center;
     exitSpot();
-    if(centerClick || !p) return;
+    if(centerClick || !p){ notifyParentDismiss(); return; }
     if(p.kind==="folder"){ zoomFolderNode(p); return; }
-    if(p.f){ selectFileNode(p); return; }
+    if(p.f){ selectFileNode(p); notifyParentFileSelection(); return; }
     if(p.kind){ focusRingNode(p); return; }
     return;
   }
   if(mode==="overview" && selectedFile && !p && isNearFocusedFile(e.clientX,e.clientY)){
-    clearFileFocus(); return;
+    clearFileFocus(); notifyParentDismiss(); return;
   }
   if(p && p.kind==="folder"){
     if(selectedFolder===p){
-      clearFolderFocus(); return;
+      clearFolderFocus(); notifyParentDismiss(); return;
     }
     activatePicked(p); return;
   }
+  if(p&&p.f){ selectFileNode(p); notifyParentFileSelection(); return; }
   if(activatePicked(p)) return;
   if(mode==="overview" && selectedFolder && isNearFocusedFolder(e.clientX,e.clientY)){
     clearFolderFocus(); return;
@@ -1611,9 +1659,10 @@ canvas.addEventListener("click", e=>{
     if(Math.hypot(e.clientX-sx,e.clientY-sy) < g.r*cam.s+10){ zoomGroup(g); return; }
   }
   if(focusedRing){
-    clearRingFocus(); return;
+    clearRingFocus(); notifyParentDismiss(); return;
   }
   clearFolderFocus();
+  notifyParentDismiss();
 });
 function pick(px,py){
   if(mode==="spot"){
@@ -1767,7 +1816,9 @@ document.getElementById("censusToggle").addEventListener("change", e=>{
 });
 addEventListener("message",e=>{
   const d=e.data;
+  if(d&&d.type==="vault-map-host-capabilities") parentPropertiesPanel=!!d.propertiesPanel;
   if(d&&d.type==="vault-map-highlight") setHighlight(d.dimension,d.value);
+  if(d&&d.type==="vault-map-selection") applyExternalSelection(d.selection||null);
 });
 
 requestAnimationFrame(()=>{      // let the loading mask paint before we build
