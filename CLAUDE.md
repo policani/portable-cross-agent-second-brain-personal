@@ -48,6 +48,17 @@ opening. It follows pointer sections one hop, and its index self-rebuilds when
 notes change (`python brain.py --index` forces it). If it prints no match, fall
 back to the routing map below, then Grep.
 
+When the task depends on how two notes, folders, or ideas connect, run
+`python brain.py --related "<question>"`. It keeps direct source references
+marked `EXTRACTED` and similar-content candidates marked `INFERRED` with a
+score and shared terms; treat inferred links as leads to inspect, not facts.
+
+**Scoped local instructions.** Before working in a nested project or answering
+a folder-specific operational question, run
+`python brain.py --instructions "<active-folder-or-file>"`. Follow the reported
+root-to-nearest chain for this client; source instructions remain authoritative
+and a local rule never becomes vault-wide policy merely because it is indexed.
+
 Routing map:
 
 - Who someone is, their role, who decides → `key-people`

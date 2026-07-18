@@ -1,6 +1,6 @@
 # Product Improvement Plan
 
-Last updated: 2026-07-01
+Last updated: 2026-07-18
 
 ## Customer-language correction
 
@@ -40,3 +40,16 @@ ownership without implying team governance.
 - Direct ingest is balanced by traceability and cleanup guidance.
 - Examples do not include private personal data.
 - The Personal edition stays clearly distinct from the Team edition.
+
+## Completed foundation — 2026-07-18
+
+- Added a durable relationship ledger to the bundled index: direct references are
+  marked extracted; similar-content candidates are marked inferred with a score
+  and shared-term explanation. Agents can inspect the result with
+  `python brain.py --related "<question>"`.
+- Added `PRODUCT_IDENTITY.md` as the shared positioning and claim-discipline
+  source of truth for both editions. It defines customer problems, personal and
+  business value, product boundaries, and a reproducible token-efficiency
+  measurement protocol.
+- Replaced unsupported universal savings/payback language in the README with
+  evidence-backed mechanism claims.

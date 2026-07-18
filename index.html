@@ -306,6 +306,25 @@ const secByFile={}; (IX.sections||[]).forEach(s=>{(secByFile[s.file]=secByFile[s
 const outRefs={}, inRefs={};
 files.forEach(f=>{ if(f.links&&f.links.length) outRefs[f.path]=f.links.slice(); });
 for(const [src,refs] of Object.entries(outRefs)) refs.forEach(t=>{ (inRefs[t]=inRefs[t]||[]).push(src); });
+// Newer indexes expose scoped instruction provenance. Older generated indexes
+// still render normally with this empty fallback.
+const instructionRegistry=IX.instruction_registry||{files:[],scopes:{}};
+const instructionByPath=Object.fromEntries(instructionRegistry.files.map(x=>[x.path,x]));
+const instructionByScope={};
+instructionRegistry.files.forEach(x=>{(instructionByScope[x.scope]=instructionByScope[x.scope]||{})[x.client]=x;});
+function scopeAncestors(scope){
+  if(!scope||scope===".") return ["."];
+  const parts=scope.split("/"), out=["."];
+  for(let i=1;i<=parts.length;i++) out.push(parts.slice(0,i).join("/"));
+  return out;
+}
+function instructionChain(scope,client){
+  const normalized=scope||".";
+  const exact=(instructionRegistry.scopes[normalized]||{})[client];
+  if(exact) return exact;
+  return scopeAncestors(normalized).map(s=>instructionByScope[s]&&instructionByScope[s][client])
+    .filter(Boolean).map(x=>x.path);
+}
 files.forEach(f=>{ f._role=roleOf(f); f._fmt=formatOf(f);
   f._out=(outRefs[f.path]||[]).length; f._in=(inRefs[f.path]||[]).length; f._refs=f._out+f._in; });
 const arms=IX.arms||{};
@@ -747,10 +766,13 @@ function renderFolderInspector(path){
   const box=$(".inspector");
   const items=files.filter(f=>path ? f.path===path||f.path.startsWith(path+"/") : true);
   const label=path||"All files";
+  const chain=client=>instructionChain(path||".",client).map(p=>`<li>${esc(p)}</li>`).join("")||"<li>none discovered</li>";
   box.innerHTML=`<div class="insp"><span class="x" id="ix">✕</span>
     <h2>📁 ${esc(label)}</h2>
     <div class="type"><span class="chip">${items.length} file${items.length===1?"":"s"}</span></div>
     <div class="sum">Showing the files in this folder in the current view.</div>
+    <div class="seclabel">Effective instruction chains · root → nearest</div>
+    <div style="font-size:11px;color:var(--dim2)"><b>Codex / Cursor</b><ul class="seclist">${chain("codex")}</ul><b>Claude</b><ul class="seclist">${chain("claude")}</ul></div>
   </div>`;
   $("#ix").onclick=closeInspector;
 }
@@ -771,6 +793,8 @@ function renderFileInspector(f){
   const ins=(inRefs[f.path]||[]).map(p=>refRow(p,"in ←")).join("");
   const secs=(secByFile[f.path]||[]).slice(0,40).map(s=>`<li>${esc(s.heading)}<span>line ${s.line}</span></li>`).join("");
   const href=encodeURI((IX.root_rel||"")+f.path);
+  const instruction=instructionByPath[f.path];
+  const scopeNote=instruction?`<div class="seclabel">Scoped instruction</div><div style="font-size:11px;color:var(--ok)">${esc(instruction.client)} · governs ${esc(instruction.scope)}${instruction.parent?" · inherits "+esc(instruction.parent):""}</div>`:"";
   box.innerHTML=`<div class="insp">
     <span class="x" id="ix">✕</span>
     <h2><span class="fdot" style="width:11px;height:11px;background:${dimHex(f)}"></span>${esc(fileName(f.path))}</h2>
@@ -779,6 +803,7 @@ function renderFileInspector(f){
       `<span class="chip" style="color:${f.indexed===false?'var(--dim)':'var(--ok)'}">${f.indexed===false?"not indexed":"indexed"}</span></div>
     <div class="path">${esc(f.path)}</div>
     <div class="sum">${esc(f.summary||"No summary recorded.")}</div>
+    ${scopeNote}
     <div class="stats">
       <div class="stat"><div class="v">${kb(f.bytes||0)}</div><div class="l">size</div></div>
       <div class="stat"><div class="v">${f.indexed===false?"—":(f.sections||0)}</div><div class="l">sections</div></div>

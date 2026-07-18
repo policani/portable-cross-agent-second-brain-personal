@@ -2,9 +2,9 @@
 
 Memventory is a structured, visual second brain for **one person**: a portable
 plain-markdown wiki that works the same in **Claude, Codex, and Cursor**. It
-routes to the note it needs instead of loading everything, so it **saves tokens**
-— and because you're the only user, there's no approval queue: the AI drafts
-straight into your notes and you edit or prune in place.
+routes to the note it needs instead of loading everything, limiting unnecessary
+context loading — and because you're the only user, there's no approval queue:
+the AI drafts straight into your notes and you edit or prune in place.
 
 No database. No vectors. No Obsidian. No lock-in. Clone it, fill in seven notes,
 point any of three agents at it, and your AI stops forgetting who you are between
@@ -15,6 +15,18 @@ sessions.
 *The bundled Management Console renders your vault like this. Open `index.html`
 through the included launcher to search files, browse folder regions, switch
 views, and inspect the live constellation.*
+
+## What it solves
+
+Memventory addresses the practical failures behind “AI amnesia”: context resets,
+repeated re-explaining, scattered decisions, uncertain AI-generated facts, and
+memory trapped in a single tool. It gives one person portable context
+continuity, source-aware working memory, selective retrieval, and direct control
+over what stays in the vault.
+
+See [PRODUCT_IDENTITY.md](PRODUCT_IDENTITY.md) for the customer problems,
+personal and business value, claim discipline, and an honest measurement method
+for token efficiency.
 
 > **Working with a team?** Use the Team edition, which adds a propose-then-approve
 > gate so shared memory stays trustworthy when more than one person (and their
@@ -62,17 +74,25 @@ Console** (`index.html`) and **`vault-map.html`**, an interactive map of the
 vault (departments, files, skills, connected apps and routines) that opens
 directly from the filesystem.
 
+Nested `AGENTS.md` and `CLAUDE.md` files stay discoverable without becoming
+global policy. Run `python brain.py --instructions "project/folder"` to inspect
+the root-to-local chain for Codex/Cursor and Claude, or
+`python brain.py --instruction-gaps` to review missing counterparts. The
+registry reports scope and provenance; it does not resolve contradictions or
+claim that client files are semantically identical.
+
 ## Why it's valuable
 
-The done-for-you, team-grade version of this is the kind of build that sells for
-around **$5,000**. This personal edition is the same core — free, MIT-licensed,
-and readable in ten minutes.
+The personal value is continuity with control: keep preferences, decisions, and
+commitments available without retelling your story to every new session. Source
+and status make it easier to separate a remembered fact from a plausible guess;
+portable files keep the memory yours when you change AI tools.
 
-The payoff is the token economy. Because the AI reads one shared context and
-routes to only the note it needs, you stop re-pasting the same background into
-every session and the model stops re-reading context it doesn't need. Fewer and
-smaller context loads means a smaller bill every session — and it compounds the
-more you use it.
+Selective routing focuses the context an agent needs and can reduce avoidable
+model-input loading when broad vault reads would otherwise recur. Memventory
+does not advertise a universal token multiplier, cost payback, or productivity
+promise—those outcomes depend on the workflow and should be measured against a
+real baseline.
 
 ## Status
 
@@ -109,7 +129,7 @@ knowledge-base/         the 7 notes: snapshot, key-people, preferences-and-rules
 _inbox/                 drop raw material here; ingest turns it into notes directly
 skills/ingest/          capture new material straight into the vault
 skills/curate/          weekly health check
-brain.py                deterministic retrieval: index + query, no dependencies
+brain.py                deterministic retrieval + scoped instruction registry + relationship ledger
 index.html              Management Console — Constellation, Types, Sizes, Table
 vault-map.html          interactive vault map, opens from the filesystem
 serve-second-brain.py   localhost-only helper for live console refreshes
@@ -139,9 +159,9 @@ The instruction files carry a small routing map — "for this kind of question,
 open this note" — and the rule *don't load the whole vault by default*. The agent
 reads the map, opens only what's relevant, and skips the rest. With seven notes
 the map is tiny; the point is that it keeps working as the vault grows to seventy.
-That's retrieval-by-routing instead of retrieval-by-embedding: no vector store,
-no index server, just a table and a discipline — and a smaller context bill every
-session.
+That's retrieval-by-routing instead of retrieval-by-embedding: no vector store
+or index server. It can reduce unnecessary context loading, but any savings
+claim should be measured in your own workflow.
 
 ## How to evaluate this in 5 minutes
 

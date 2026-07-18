@@ -111,6 +111,7 @@
 <div id="edgeKey"><b style="color:var(--text)">connections</b>
   <div><span style="color:var(--accent)">→</span> links / references out</div>
   <div><span style="color:var(--mem2)">←</span> referenced by (instruction files bold)</div>
+  <div><span style="color:#83f0c0">━</span> scoped governance (folder / parent / counterpart)</div>
   <div><span style="color:var(--dim)">┄</span> similar content</div>
   <div><span style="color:var(--agentA)">▪</span> agent twin / definition</div>
 </div>
@@ -209,12 +210,38 @@ function highlightLabel(){ return highlightDimension==="role" ? (ROLE_LABELS[hig
 const secByFile = {};
 IX.sections.forEach(s=>{ (secByFile[s.file] = secByFile[s.file]||[]).push(s); });
 
-// relationship graph from the index: out-references per indexed page
+// Relationship ledger from the index. Explicit references are extracted from
+// source text; content-neighbour links are inferred and deliberately kept
+// distinct. Older indexes fall back to the original derived relationships.
+const relationships=IX.relationships||[];
 const outRefs = {};
-IX.files.forEach(f=>{ if(f.links && f.links.length) outRefs[f.path]=f.links; });
+if(relationships.length){
+  relationships.filter(r=>r.relation==="references" && r.status==="extracted")
+    .forEach(r=>{ (outRefs[r.source]=outRefs[r.source]||[]).push(r.target); });
+} else IX.files.forEach(f=>{ if(f.links && f.links.length) outRefs[f.path]=f.links; });
 const inRefs = {};
 for(const [src, refs] of Object.entries(outRefs))
   refs.forEach(t=>{ (inRefs[t]=inRefs[t]||[]).push(src); });
+const similarRefs={};
+relationships.filter(r=>r.relation==="similar_content" && r.status==="inferred")
+  .forEach(r=>{
+    (similarRefs[r.source]=similarRefs[r.source]||[]).push(r.target);
+    (similarRefs[r.target]=similarRefs[r.target]||[]).push(r.source);
+  });
+// Scoped instruction metadata was added after the first map release. Keep an
+// empty fallback so copied older indexes remain viewable.
+const instructionRegistry=IX.instruction_registry||{files:[],scopes:{},gaps:[]};
+const governanceEdges=relationships.filter(r=>
+  ["governs","inherits_from","counterpart_of"].includes(r.relation) &&
+  r.status==="extracted");
+const governanceOut={}, governanceIn={}, instructionByScope={};
+governanceEdges.forEach(r=>{
+  (governanceOut[r.source]=governanceOut[r.source]||[]).push(r);
+  (governanceIn[r.target]=governanceIn[r.target]||[]).push(r);
+});
+instructionRegistry.files.forEach(f=>{
+  (instructionByScope[f.scope]=instructionByScope[f.scope]||{})[f.client]=f;
+});
 
 // merged term vector per indexed file, for similarity
 const fileTerms = {};
@@ -250,6 +277,19 @@ function parentFolderPath(path){
   if(!path) return null;
   const i=path.lastIndexOf("/");
   return i>=0 ? path.slice(0,i) : "";
+}
+function scopeAncestors(scope){
+  if(!scope||scope===".") return ["."];
+  const parts=scope.split("/"); const out=["."];
+  for(let i=1;i<=parts.length;i++) out.push(parts.slice(0,i).join("/"));
+  return out;
+}
+function instructionChain(scope,client){
+  const normalized=scope||".";
+  const exact=(instructionRegistry.scopes[normalized]||{})[client];
+  if(exact) return exact;
+  return scopeAncestors(normalized).map(s=>instructionByScope[s]&&instructionByScope[s][client])
+    .filter(Boolean).map(f=>f.path);
 }
 function topKey(path){
   const parts=path.split("/");
@@ -902,6 +942,18 @@ function setBuildStatus(text){
 function computeLinksProgressive(){
   if(linkJob) linkJob.cancel=true;
   links.length=0;
+  if(relationships.length){
+    const seen=new Map();
+    relationships.filter(r=>r.relation==="similar_content" && r.status==="inferred")
+      .forEach(r=>{
+        const a=nodes.findIndex(n=>n.f.path===r.source), b=nodes.findIndex(n=>n.f.path===r.target);
+        if(a<0||b<0||a===b) return;
+        const key=a<b? a+":"+b : b+":"+a;
+        seen.set(key,Math.max(seen.get(key)||0,r.confidence||0));
+      });
+    seen.forEach((s,key)=>{ const [a,b]=key.split(":").map(Number); links.push({a,b,s}); });
+    setBuildStatus(""); requestDraw(); return;
+  }
   const idxNodes=nodes.map((n,i)=>[n,i]).filter(([n])=>n.f.indexed!==false);
   if(idxNodes.length>1300){ setBuildStatus(""); return; }   // too dense to be legible
   const job={cancel:false}; linkJob=job;
@@ -990,6 +1042,18 @@ function connectionsOf(center){
       else{ const c=folderCentroid(ref); if(c) add({folder:ref,pos:c},"out"); }
     });
     (inRefs[p]||[]).forEach(src=>{ const n=pathToNode[src]; if(n) add(n,"in"); });
+    (governanceOut[p]||[]).forEach(edge=>{
+      const n=pathToNode[edge.target];
+      if(n) add(n,edge.relation);
+      else {
+        const folder=pathToFolder[edge.target==="." ? "" : edge.target];
+        const c=folder ? {x:folder.x,y:folder.y} : folderCentroid(edge.target);
+        if(c) add({folder:edge.target,pos:c},edge.relation);
+      }
+    });
+    (governanceIn[p]||[]).forEach(edge=>{
+      const n=pathToNode[edge.source]; if(n) add(n,edge.relation);
+    });
     // instruction/other pages that reference any ancestor folder of this file
     const segs=p.split("/");
     for(let i=segs.length-1;i>0;i--){
@@ -999,7 +1063,11 @@ function connectionsOf(center){
       });
     }
     if(center.f.indexed!==false){
-      nodes.filter(n=>n.f.indexed!==false && n.f.path!==p)
+      if(relationships.length){
+        (similarRefs[p]||[]).slice(0,6).forEach(ref=>{
+          const n=pathToNode[ref]; if(n) add(n,"sim");
+        });
+      } else nodes.filter(n=>n.f.indexed!==false && n.f.path!==p)
         .map(n=>[cosine(fileTerms[p],fileTerms[n.f.path]),n])
         .filter(([s])=>s>0.14).sort((a,b)=>b[0]-a[0]).slice(0,6)
         .forEach(([s,n])=>add(n,"sim"));
@@ -1250,6 +1318,7 @@ function requestDraw(){ needsDraw=true; }
 
 function edgeColor(rel){
   return rel==="out"? ACCENT : rel==="in"? BLUE : rel==="sim"? "rgba(139,148,167,0.85)"
+       : ["governs","inherits_from","counterpart_of"].includes(rel)? "#83f0c0"
        : rel==="agent"? AGENT_COLORS[0] : DIM;
 }
 function revealAlpha(depth){
@@ -1478,12 +1547,12 @@ function drawSpot(){
     ctx.strokeStyle=col;
     ctx.globalAlpha=e.ind?0.55:0.9;
     ctx.lineWidth=instruction?2.2:(e.ind?0.9:1.4);
-    ctx.setLineDash(e.rel==="sim"?[5,5]:[]);
+    ctx.setLineDash(e.rel==="sim"?[5,5]:(["governs","inherits_from","counterpart_of"].includes(e.rel)?[9,3]:[]));
     ctx.beginPath();
     const mx=(cx0+sx)/2+(cy0-sy)*0.08, my=(cy0+sy)/2+(sx-cx0)*0.08;
     ctx.moveTo(cx0,cy0); ctx.quadraticCurveTo(mx,my,sx,sy); ctx.stroke();
     ctx.setLineDash([]);
-    if(e.rel==="out") drawArrow(cx0,cy0,sx,sy,col);
+    if(e.rel==="out" || ["governs","inherits_from","counterpart_of"].includes(e.rel)) drawArrow(cx0,cy0,sx,sy,col);
     else if(e.rel==="in") drawArrow(sx,sy,cx0,cy0,col);
     ctx.globalAlpha=1;
   }
@@ -1733,13 +1802,16 @@ function showDetail(n){
     `<li>#${esc(s.heading)} <span>· line ${s.line}</span></li>`).join("");
   const href=encodeURI((IX.root_rel||"")+n.f.path);
   const rels=(outRefs[n.f.path]||[]).length + (inRefs[n.f.path]||[]).length;
+  const governing=instructionRegistry.files.find(x=>x.path===n.f.path);
+  const scopeNote=governing ? `<div style="color:#83f0c0;font-size:11px;margin-top:5px">
+      ${esc(governing.client)} instructions · scope ${esc(governing.scope)}</div>` : "";
   b.innerHTML=`<h2>${esc(n.name)}</h2>
     <div class="path">${esc(n.f.path)}</div>
     <div class="sum">${esc(n.f.summary||"")}</div>
     <div style="color:var(--dim);font-size:11px">
       ${n.f.indexed===false? "workspace file (not content-indexed)": n.f.sections+" sections"} ·
       ${(n.f.bytes/1024).toFixed(1)} KB · ${rels} direct reference(s) ·
-      <a href="${href}" target="_blank">open file</a></div>
+      <a href="${href}" target="_blank">open file</a></div>${scopeNote}
     <ul>${secs}</ul>`;
   d.style.display="block";
 }
@@ -1757,6 +1829,14 @@ function showFolderDetail(f){
   const instructions=f.files.filter(isInstructionFile)
     .map(x=>`<li>${esc(fileName(x.path))} <span>· ${esc(x.path)}</span></li>`).join("");
   const childCount=f.children.size;
+  const scope=f.path||".";
+  const chain=(client)=>instructionChain(scope,client).map(path=>{
+    const entry=instructionRegistry.files.find(x=>x.path===path)||{};
+    return `<li>${esc(path)} <span>· ${esc(entry.summary||"scoped instruction")}</span></li>`;
+  }).join("") || "<li>(no discovered instruction files)</li>";
+  const governance=`<div style="margin-top:10px;color:#83f0c0;font-size:11px">Effective instruction chains · root → nearest</div>
+    <div style="font-size:11px;margin-top:4px"><b>Codex / Cursor</b><ul>${chain("codex")}</ul></div>
+    <div style="font-size:11px"><b>Claude</b><ul>${chain("claude")}</ul></div>`;
   const href=f.path ? encodeURI((IX.root_rel||"")+f.path+"/") : encodeURI(IX.root_rel||"../");
   b.innerHTML=`<h2>${esc(f.name || IX.root_name)}/</h2>
     <div class="path">${esc(f.path || IX.root_name)}</div>
@@ -1764,7 +1844,7 @@ function showFolderDetail(f){
     <div style="color:var(--dim);font-size:11px">
       ${(f.bytes/1024).toFixed(1)} KB direct file bytes ·
       <a href="${href}" target="_blank">open folder</a></div>
-    ${instructions? `<ul>${instructions}</ul>`:""}`;
+    ${instructions? `<ul>${instructions}</ul>`:""}${governance}`;
   d.style.display="block";
 }
 function hideDetail(){ document.getElementById("detail").style.display="none"; }

@@ -1,3 +1,10 @@
 {
-  "census": true
+  "census": true,
+  "instructions": {
+    "enabled": true,
+    "root": ".",
+    "names": ["AGENTS.md", "CLAUDE.md"],
+    "exclude": ["tmp", "node_modules", ".git", ".venv", "dist", "_archive*"],
+    "content": true
+  }
 }

@@ -14,12 +14,15 @@ filesystem without a server). Root-level ``*.md`` files (CLAUDE.md,
 AGENTS.md, README.md) are indexed too, and every indexed page contributes
 its outbound relationships — markdown links plus absolute workspace path
 references — so the map can show how instruction files and notes actually
-connect to folders and files.
+connect to folders and files. It also writes a small, durable relationship
+ledger: explicit references are ``extracted``; content-neighbour links are
+``inferred`` and carry their deterministic similarity score and shared terms.
 
 Answer "where is X?" without spending model tokens
 --------------------------------------------------
     python brain.py "which TTS voice did we use"
     python brain.py --show "approval gate rules"
+    python brain.py --related "approval gate rules"
 
 Query mode strips the question to keywords, scores every indexed section
 against them (tf-idf with heading and filename bonuses), and prints the
@@ -27,6 +30,10 @@ top-ranked sections as ``path:line`` targets. ``--show`` also prints the
 best section's text, so short factual lookups never require opening a file
 at all. If the winning section is only a pointer to another page, the
 pointer is followed one hop automatically.
+
+``--related`` resolves the best matching file and prints its durable
+relationships. This is deliberately evidence-aware: an explicit source link is
+not presented as equivalent to an inferred content neighbour.
 
 The index self-heals: if any scanned markdown file is newer than the index,
 query mode rebuilds it before answering. There is no separate maintenance
@@ -57,6 +64,10 @@ Configuration (optional)
 * ``exclude``: folder/file names to skip everywhere, merged with the
   defaults (node_modules, .git, __pycache__, build outputs, legacy-*).
 * ``applications`` / ``routines`` feed the map's outer rings only.
+* ``instructions``: independent nested ``AGENTS.md`` / ``CLAUDE.md`` discovery.
+  Its ``root``, filename ``names``, explicit ``exclude`` list, and ``content``
+  privacy switch let operational instructions be retrieved without adding all
+  neighbouring files to ``scan_dirs``. Instruction scope remains local.
 * ``agents``: where subagent definitions live, one entry per tool, e.g.
   ``[{"dir": "ops/cowork-agents", "tool": "cowork"},
      {"dir": "ops/.codex/agents", "tool": "codex"}]``. Both ``.md`` and
@@ -102,11 +113,29 @@ DEFAULT_EXCLUDES = [
     "build", ".next", ".cache", "legacy-*", "_archive*",
     "brain-index.json", "brain-index.js",
 ] + JUNK_PATTERNS
+# Instruction discovery must not inherit the normal content scanner's ``build``
+# exclusion: active projects may put their local rules there. These safety
+# exclusions still prevent dependency/cache/archive/temporary traversal.
+INSTRUCTION_SAFETY_EXCLUDES = [
+    "node_modules", ".git", ".venv", "venv", "dist", ".next", ".cache",
+    "legacy-*", "_archive*",
+] + JUNK_PATTERNS
+DEFAULT_INSTRUCTIONS = {
+    "enabled": True,
+    "root": ".",
+    "names": ["AGENTS.md", "CLAUDE.md"],
+    "exclude": ["tmp", "node_modules", ".git", ".venv", "dist", "_archive*"],
+    "content": True,
+}
 MAX_SHOW_LINES = 60          # cap on printed section body
 POINTER_MAX_CHARS = 400      # a section this short that links out is a pointer
 MAX_CENSUS = 60_000          # hard cap on census entries
 MAX_REFS = 40                # per-file cap on outbound relationships
 TOP_N = 3
+SIMILARITY_THRESHOLD = 0.14  # conservative visual/retrieval-neighbour cutoff
+MAX_SIMILAR_PER_FILE = 2     # avoid turning the ledger into a dense web
+MAX_SIMILARITY_TERMS = 40    # same compact profile used by the map
+MAX_SHARED_TERMS = 5
 
 # File taxonomy used by the console and map.  Markdown files are refined by
 # their path/name below; binary and structured formats are unambiguous enough
@@ -152,6 +181,14 @@ def load_config() -> dict:
             sys.exit(f"brain-config.json is not valid JSON: {exc}")
     cfg["_root"] = (ROOT / cfg["vault_root"]).resolve()
     cfg["_excludes"] = DEFAULT_EXCLUDES + list(cfg.get("exclude") or [])
+    instructions = dict(DEFAULT_INSTRUCTIONS)
+    instructions.update(cfg.get("instructions") or {})
+    instructions["_root"] = (cfg["_root"] / instructions["root"]).resolve()
+    instructions["_names"] = {str(name).lower()
+                              for name in instructions.get("names", [])}
+    instructions["_excludes"] = (INSTRUCTION_SAFETY_EXCLUDES
+                                  + list(instructions.get("exclude") or []))
+    cfg["instructions"] = instructions
     if not cfg.get("scan_dirs"):
         cfg["scan_dirs"] = [d for d in KNOWN_DIRS
                             if (cfg["_root"] / d).is_dir()]
@@ -225,6 +262,29 @@ def md_files(cfg: dict) -> list[Path]:
     return out
 
 
+def instruction_files(cfg: dict) -> list[Path]:
+    """Discover scoped instruction sources independently of ``scan_dirs``."""
+    spec = cfg["instructions"]
+    if not spec.get("enabled") or not spec["_root"].is_dir():
+        return []
+    return [p for p in walk(spec["_root"], spec["_excludes"])
+            if p.name.lower() in spec["_names"]]
+
+
+def indexed_md_files(cfg: dict) -> list[Path]:
+    """Content-indexed Markdown, with instruction paths de-duplicated."""
+    paths = list(md_files(cfg))
+    if cfg["instructions"].get("content"):
+        paths.extend(instruction_files(cfg))
+    unique: dict[str, Path] = {}
+    for path in paths:
+        try:
+            unique[rel_to_root(path, cfg)] = path
+        except ValueError:
+            continue
+    return [unique[key] for key in sorted(unique)]
+
+
 def extract_refs(text: str, path: Path, cfg: dict) -> list[str]:
     """Outbound relationships: relative md links + absolute workspace paths.
 
@@ -289,6 +349,97 @@ def split_sections(text: str) -> list[dict]:
     return [s for s in sections if s["text"] or s["heading"] != "(intro)"]
 
 
+def cosine_similarity(a: dict[str, float], b: dict[str, float]) -> float:
+    """Cosine similarity for compact, deterministic word-count profiles."""
+    if not a or not b:
+        return 0.0
+    dot = sum(v * b.get(term, 0) for term, v in a.items())
+    norm_a = math.sqrt(sum(v * v for v in a.values()))
+    norm_b = math.sqrt(sum(v * v for v in b.values()))
+    return dot / (norm_a * norm_b or 1.0)
+
+
+def compact_profile(terms: dict[str, float]) -> dict[str, float]:
+    """Keep the strongest terms so similarity stays cheap and explainable."""
+    return dict(sorted(terms.items(), key=lambda item: (-item[1], item[0]))
+                [:MAX_SIMILARITY_TERMS])
+
+
+def shared_terms(a: dict[str, float], b: dict[str, float]) -> list[str]:
+    """Return a short human-readable explanation for an inferred edge."""
+    return [term for term, _ in sorted(
+        ((term, min(count, b[term])) for term, count in a.items() if term in b),
+        key=lambda item: (-item[1], item[0]))[:MAX_SHARED_TERMS]]
+
+
+def build_relationships(files: list[dict], profiles: dict[str, dict[str, float]],
+                        instruction_registry: dict | None = None) -> list[dict]:
+    """Build a queryable relationship ledger with provenance and confidence.
+
+    ``references`` are direct evidence from the source. ``similar_content``
+    edges are intentionally labeled inferred: shared vocabulary can indicate a
+    useful neighbour, not a verified fact or dependency.
+    """
+    relationships: list[dict] = []
+    indexed = sorted(f["path"] for f in files if f.get("indexed"))
+    for f in sorted(files, key=lambda item: item["path"]):
+        for target in f.get("links", []):
+            relationships.append({
+                "source": f["path"],
+                "target": target,
+                "relation": "references",
+                "status": "extracted",
+                "confidence": 1.0,
+                "evidence": "markdown_link_or_workspace_path",
+            })
+    similar_seen: set[tuple[str, str]] = set()
+    for source in indexed:
+        candidates = []
+        for target in indexed:
+            if source == target:
+                continue
+            score = cosine_similarity(profiles.get(source, {}),
+                                      profiles.get(target, {}))
+            if score >= SIMILARITY_THRESHOLD:
+                candidates.append((score, target))
+        for score, target in sorted(candidates, key=lambda item: (-item[0], item[1]))[:MAX_SIMILAR_PER_FILE]:
+            pair = tuple(sorted((source, target)))
+            if pair in similar_seen:
+                continue
+            similar_seen.add(pair)
+            relationships.append({
+                "source": source,
+                "target": target,
+                "relation": "similar_content",
+                "status": "inferred",
+                "confidence": round(score, 3),
+                "evidence": "shared_indexed_terms",
+                "shared_terms": shared_terms(profiles.get(source, {}),
+                                             profiles.get(target, {})),
+            })
+    for entry in (instruction_registry or {}).get("files", []):
+        relationships.append({
+            "source": entry["path"], "target": entry["scope"],
+            "relation": "governs", "status": "extracted", "confidence": 1.0,
+            "evidence": "instruction_filename_and_containing_folder",
+        })
+        if entry.get("parent"):
+            relationships.append({
+                "source": entry["path"], "target": entry["parent"],
+                "relation": "inherits_from", "status": "extracted", "confidence": 1.0,
+                "evidence": "nearest_ancestor_same_client_instruction",
+            })
+        # Keep the directed relationship client-specific: AGENTS.md identifies
+        # its CLAUDE.md sibling; the registry itself records the sibling for both.
+        if entry["client"] == "codex" and entry.get("counterpart"):
+            relationships.append({
+                "source": entry["path"], "target": entry["counterpart"],
+                "relation": "counterpart_of", "status": "extracted", "confidence": 1.0,
+                "evidence": "same_scope_instruction_filename",
+            })
+    return relationships
+
+
 def first_sentence(text: str) -> str:
     for line in text.splitlines():
         line = line.strip().lstrip("-*# ").strip()
@@ -312,6 +463,78 @@ def discover_skills() -> list[dict]:
 
 def rel_to_root(path: Path, cfg: dict) -> str:
     return path.resolve().relative_to(cfg["_root"]).as_posix()
+
+
+def instruction_client(path: str) -> str:
+    return "codex" if Path(path).name.lower() == "agents.md" else "claude"
+
+
+def scope_of_instruction(path: str) -> str:
+    parent = Path(path).parent.as_posix()
+    return "." if parent == "." else parent
+
+
+def scope_ancestors(scope: str) -> list[str]:
+    if scope in ("", "."):
+        return ["."]
+    parts = scope.split("/")
+    return ["."] + ["/".join(parts[:i]) for i in range(1, len(parts) + 1)]
+
+
+def build_instruction_registry(paths: list[Path], summaries: dict[str, str],
+                               cfg: dict) -> dict:
+    """Create the provenance-only hierarchy for discovered instruction files."""
+    names = cfg["instructions"]["_names"]
+    records: list[dict] = []
+    for path in paths:
+        try:
+            rel = rel_to_root(path, cfg)
+        except ValueError:
+            continue
+        if path.name.lower() not in names:
+            continue
+        records.append({"path": rel, "client": instruction_client(rel),
+                        "scope": scope_of_instruction(rel),
+                        "summary": summaries.get(rel, ""),
+                        "parent": None, "counterpart": None})
+    records.sort(key=lambda item: item["path"])
+    by_path = {item["path"]: item for item in records}
+    by_scope: dict[str, dict[str, dict]] = {}
+    for item in records:
+        by_scope.setdefault(item["scope"], {})[item["client"]] = item
+    for item in records:
+        parent = None
+        for ancestor in reversed(scope_ancestors(item["scope"])[:-1]):
+            candidate = by_scope.get(ancestor, {}).get(item["client"])
+            if candidate:
+                parent = candidate["path"]
+                break
+        item["parent"] = parent
+        twin = by_scope.get(item["scope"], {}).get(
+            "claude" if item["client"] == "codex" else "codex")
+        item["counterpart"] = twin["path"] if twin else None
+    scopes: dict[str, dict[str, list[str]]] = {}
+    for scope in sorted(by_scope):
+        scopes[scope] = {}
+        for client in ("codex", "claude"):
+            chain = []
+            for ancestor in scope_ancestors(scope):
+                entry = by_scope.get(ancestor, {}).get(client)
+                if entry:
+                    chain.append(entry["path"])
+            scopes[scope][client] = chain
+    gaps: list[dict] = []
+    for scope, clients in sorted(by_scope.items()):
+        present = sorted(clients)
+        missing = [client for client in ("codex", "claude") if client not in clients]
+        if missing:
+            gaps.append({"scope": scope, "kind": "missing_counterpart",
+                         "present": present, "missing": missing})
+        chains = scopes[scope]
+        if bool(chains["codex"]) != bool(chains["claude"]):
+            gaps.append({"scope": scope, "kind": "asymmetric_chain",
+                         "codex": chains["codex"], "claude": chains["claude"]})
+    return {"files": records, "scopes": scopes, "gaps": gaps}
 
 
 AGENT_SKIP_STEMS = {"claude", "agents", "readme", "install", "license"}
@@ -429,8 +652,20 @@ def build_index(verbose: bool = True) -> dict:
     cfg = load_config()
     files, sections = [], []
     df: dict[str, int] = {}
+    raw_file_terms: dict[str, dict[str, int]] = {}
     indexed_paths = set()
-    for path in md_files(cfg):
+    discovered_instructions = instruction_files(cfg)
+    paths = list(md_files(cfg))
+    if cfg["instructions"].get("content"):
+        paths.extend(discovered_instructions)
+    unique_paths: dict[str, Path] = {}
+    for path in paths:
+        try:
+            unique_paths[rel_to_root(path, cfg)] = path
+        except ValueError:
+            continue
+    summaries: dict[str, str] = {}
+    for path in (unique_paths[key] for key in sorted(unique_paths)):
         rel = rel_to_root(path, cfg)
         if rel in indexed_paths:
             continue
@@ -447,11 +682,14 @@ def build_index(verbose: bool = True) -> dict:
             "indexed": True,
             "links": extract_refs(text, path, cfg),
         })
+        summaries[rel] = first_sentence(text)
         fname_terms = tokenize(path.stem.replace("-", " ").replace("_", " "))
+        page_terms: dict[str, int] = {}
         for sec in page_secs:
             terms: dict[str, int] = {}
             for w in tokenize(sec["text"]):
                 terms[w] = terms.get(w, 0) + 1
+                page_terms[w] = page_terms.get(w, 0) + 1
             h_terms = tokenize(sec["heading"])
             for w in set(terms) | set(h_terms):
                 df[w] = df.get(w, 0) + 1
@@ -465,6 +703,7 @@ def build_index(verbose: bool = True) -> dict:
                 "fterms": fname_terms,
                 "chars": len(sec["text"]),
             })
+        raw_file_terms[rel] = page_terms
     census_n = 0
     if cfg.get("census"):
         for path in walk(cfg["_root"], cfg["_excludes"]):
@@ -486,7 +725,21 @@ def build_index(verbose: bool = True) -> dict:
                 "indexed": False,
             })
             census_n += 1
+    # Term-frequency alone over-emphasizes generic vault words such as "notes"
+    # and "source". Weight each file profile by inverse section frequency so
+    # inferred neighbours are anchored in the more distinctive vocabulary.
+    n_sections = max(len(sections), 1)
+    file_profiles = {
+        rel: compact_profile({
+            term: count * math.log(1 + n_sections / (df.get(term) or n_sections))
+            for term, count in terms.items()
+        })
+        for rel, terms in raw_file_terms.items()
+    }
     agents, agent_gaps = discover_agents(cfg)
+    instruction_registry = build_instruction_registry(
+        discovered_instructions, summaries, cfg)
+    relationships = build_relationships(files, file_profiles, instruction_registry)
     import os
     prefix = "" if cfg["_root"] == ROOT else (
         os.path.relpath(cfg["_root"], ROOT).replace("\\", "/") + "/")
@@ -498,6 +751,8 @@ def build_index(verbose: bool = True) -> dict:
         "n_sections": len(sections),
         "files": files,
         "sections": sections,
+        "relationships": relationships,
+        "instruction_registry": instruction_registry,
         "df": df,
         "arms": {
             "applications": cfg.get("applications", []),
@@ -516,6 +771,9 @@ def build_index(verbose: bool = True) -> dict:
         msg = (f"brain: indexed {len(indexed_paths)} md files / "
                f"{len(sections)} sections from "
                f"{', '.join(cfg['scan_dirs']) or '(nothing found)'}")
+        explicit = sum(1 for r in relationships if r["status"] == "extracted")
+        inferred = len(relationships) - explicit
+        msg += f" + {explicit} extracted / {inferred} inferred relationships"
         if cfg.get("census"):
             msg += f" + census of {census_n} workspace files"
         if agents:
@@ -524,6 +782,9 @@ def build_index(verbose: bool = True) -> dict:
                 per_tool[a["tool"]] = per_tool.get(a["tool"], 0) + 1
             msg += " + agents " + ", ".join(
                 f"{t}:{c}" for t, c in sorted(per_tool.items()))
+        if instruction_registry["files"]:
+            msg += (f" + {len(instruction_registry['files'])} scoped instruction"
+                    f" file(s), {len(instruction_registry['gaps'])} gap signal(s)")
         print(msg + f" -> {INDEX_JSON.name}, {INDEX_JS.name}")
         for g in agent_gaps:
             print(f"WARN  agent role '{g['role']}' has no counterpart in: "
@@ -534,7 +795,10 @@ def build_index(verbose: bool = True) -> dict:
 def load_index() -> dict:
     """Load the index, rebuilding automatically when it is missing/stale."""
     cfg = load_config()
-    newest = max((p.stat().st_mtime for p in md_files(cfg)), default=0.0)
+    # Scope inventory is part of the generated index even in privacy mode, so
+    # discovered instruction edits must always invalidate it.
+    tracked = list(md_files(cfg)) + instruction_files(cfg)
+    newest = max((p.stat().st_mtime for p in tracked), default=0.0)
     if not INDEX_JSON.exists() or INDEX_JSON.stat().st_mtime < newest:
         return build_index(verbose=False)
     return json.loads(read_text(INDEX_JSON))
@@ -611,7 +875,109 @@ def follow_pointer(text: str, from_file: str, index: dict) -> str | None:
     return rel if target.exists() else None
 
 
-def run_query(query: str, show: bool, top: int) -> int:
+def print_relationships(path: str, index: dict) -> None:
+    """Print relationships touching a file, keeping evidence classes visible."""
+    edges = [r for r in index.get("relationships", [])
+             if r["source"] == path or r["target"] == path]
+    if not edges:
+        print(f"\nNo recorded relationships for {path}.")
+        return
+    print(f"\n--- relationships: {path} ---")
+    for edge in sorted(edges, key=lambda r: (
+            r["status"] != "extracted", r["relation"],
+            r["target"] if r["source"] == path else r["source"])):
+        direction = "->" if edge["source"] == path else "<-"
+        other = edge["target"] if direction == "->" else edge["source"]
+        label = edge["status"].upper()
+        print(f"  {label:<9} {direction} {edge['relation']}: {other} "
+              f"(confidence {edge['confidence']:.3f})")
+        if edge.get("shared_terms"):
+            print(f"            shared terms: {', '.join(edge['shared_terms'])}")
+
+
+def instruction_records(index: dict) -> dict[str, dict]:
+    return {item["path"]: item
+            for item in index.get("instruction_registry", {}).get("files", [])}
+
+
+def resolve_instruction_scope(target: str, index: dict) -> str | None:
+    """Resolve a workspace-relative file/folder to its containing scope."""
+    root = (ROOT / index.get("root_rel", "")).resolve()
+    candidate = Path(target)
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    try:
+        resolved = candidate.resolve()
+        rel = resolved.relative_to(root).as_posix()
+    except (ValueError, OSError):
+        return None
+    if resolved.exists() and resolved.is_file():
+        return scope_of_instruction(rel) if resolved.name.lower() in {
+            "agents.md", "claude.md"} else (Path(rel).parent.as_posix() or ".")
+    return rel if rel else "."
+
+
+def chain_for_scope(scope: str, registry: dict, client: str) -> list[str]:
+    """Return root-to-nearest instruction sources for any existing folder."""
+    exact = registry.get("scopes", {}).get(scope, {}).get(client)
+    if exact is not None:
+        return exact
+    records = {(item["scope"], item["client"]): item["path"]
+               for item in registry.get("files", [])}
+    return [records[(ancestor, client)] for ancestor in scope_ancestors(scope)
+            if (ancestor, client) in records]
+
+
+def print_instructions(target: str) -> int:
+    index = load_index()
+    scope = resolve_instruction_scope(target, index)
+    if scope is None:
+        print(f"brain: instruction path must stay inside the workspace: {target}")
+        return 2
+    registry = index.get("instruction_registry")
+    if not registry:
+        print("brain: this index predates scoped instruction registry support; rebuilding.")
+        index = build_index(verbose=False)
+        registry = index.get("instruction_registry", {})
+    records = instruction_records(index)
+    shown = scope or "."
+    print(f"brain: effective instructions for {shown}")
+    for client in ("codex", "claude"):
+        chain = chain_for_scope(scope, registry, client)
+        print(f"  {client} (root -> nearest):")
+        if not chain:
+            print("    (no discovered instruction files)")
+            continue
+        for path in chain:
+            entry = records.get(path, {})
+            summary = entry.get("summary") or "(summary unavailable; content indexing is disabled)"
+            print(f"    {path}  governs {entry.get('scope', scope)}")
+            print(f"      {summary}")
+    return 0
+
+
+def print_instruction_gaps() -> int:
+    index = load_index()
+    registry = index.get("instruction_registry")
+    if registry is None:
+        index = build_index(verbose=False)
+        registry = index.get("instruction_registry", {})
+    gaps = registry.get("gaps", [])
+    if not gaps:
+        print("brain: no scoped-instruction gap signals.")
+        return 0
+    print("brain: scoped-instruction gap signals (review cues, not defects)")
+    for gap in gaps:
+        if gap["kind"] == "missing_counterpart":
+            print(f"  {gap['scope']}: missing same-scope {' / '.join(gap['missing'])} "
+                  f"counterpart (present: {' / '.join(gap['present'])})")
+        else:
+            print(f"  {gap['scope']}: asymmetric effective chain "
+                  f"(codex {len(gap['codex'])}, claude {len(gap['claude'])})")
+    return 0
+
+
+def run_query(query: str, show: bool, top: int, related: bool = False) -> int:
     index = load_index()
     hits = score_sections(query, index)
     if not hits:
@@ -619,9 +985,13 @@ def run_query(query: str, show: bool, top: int) -> int:
               "Fall back to Grep/Glob.")
         return 1
     print(f'brain: top matches for "{query}"')
+    instructions = instruction_records(index)
     for s, sec in hits[:top]:
+        source = instructions.get(sec["file"])
+        provenance = (f" [{source['client']} instructions · scope {source['scope']}]"
+                      if source else "")
         print(f"  {sec['file']}:{sec['line']}  #{sec['heading']}  "
-              f"(score {s:.1f})")
+              f"(score {s:.1f}){provenance}")
         if sec["summary"]:
             print(f"      {sec['summary']}")
     if show:
@@ -638,6 +1008,8 @@ def run_query(query: str, show: bool, top: int) -> int:
                 print(section_text(t_sec, index))
             else:
                 print(f"(open {target} directly; it is outside the index)")
+    if related:
+        print_relationships(hits[0][1]["file"], index)
     return 0
 
 
@@ -649,6 +1021,12 @@ def main() -> int:
                     help="rebuild brain-index.json / brain-index.js")
     ap.add_argument("--show", action="store_true",
                     help="print the best-matching section body")
+    ap.add_argument("--related", action="store_true",
+                    help="print extracted and inferred relationships for the best match")
+    ap.add_argument("--instructions", metavar="PATH",
+                    help="show effective AGENTS.md / CLAUDE.md chains for a file or folder")
+    ap.add_argument("--instruction-gaps", action="store_true",
+                    help="list missing counterparts and asymmetric instruction chains")
     ap.add_argument("--junk", action="store_true",
                     help="list cache/swap/temp junk files in the vault")
     ap.add_argument("--delete", action="store_true",
@@ -661,10 +1039,14 @@ def main() -> int:
     if args.index:
         build_index()
         return 0
+    if args.instructions:
+        return print_instructions(args.instructions)
+    if args.instruction_gaps:
+        return print_instruction_gaps()
     if not args.query:
         ap.print_help()
         return 2
-    return run_query(" ".join(args.query), args.show, args.top)
+    return run_query(" ".join(args.query), args.show, args.top, args.related)
 
 
 if __name__ == "__main__":
