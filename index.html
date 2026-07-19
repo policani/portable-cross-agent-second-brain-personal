@@ -96,6 +96,7 @@
   tbody td{padding:7px 10px;border-bottom:1px solid #171e29;vertical-align:top}
   tbody td.num{text-align:right;color:var(--dim);font-variant-numeric:tabular-nums;white-space:nowrap}
   tbody tr{cursor:pointer} tbody tr:hover{background:var(--rowhover)} tbody tr.sel{background:var(--sel)}
+  tbody tr.cleanup-item td:first-child .nm{color:var(--bad)}
   .fname{display:flex;align-items:center;gap:7px}
   .fdot{width:8px;height:8px;border-radius:2px;flex:none}
   .fname .nm{font-weight:500}
@@ -170,6 +171,7 @@
   .insp .open:hover{border-color:var(--accent);text-decoration:none}
   .insp .x{float:right;color:var(--dim);cursor:pointer;font-size:15px;line-height:1}
   .chip{font-size:10px;padding:2px 8px;border-radius:12px;border:1px solid var(--line2)}
+  .triage-mark{color:var(--bad);font-size:11px;margin-left:5px}
   .scopehint{margin:5px 14px 8px;color:var(--dim2);font-size:10.5px;line-height:1.35}
   .cleanup{padding:16px 18px;max-width:1100px}.cleanup .notice{border-left:3px solid var(--accent);padding:8px 10px;background:var(--panel);color:var(--dim);font-size:12px;margin:12px 0}.cleanup .signal{display:grid;grid-template-columns:minmax(150px,1fr) 2fr 90px;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid #171e29}.cleanup .signal span{color:var(--dim);font-size:11px}.cleanup .num{text-align:right;color:var(--text)}.cleanup-locations{display:grid;gap:6px}.cleanup-location{width:100%;display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:12px;align-items:center;text-align:left;background:var(--panel);border:1px solid var(--line2);color:var(--text);border-radius:7px;padding:8px 10px}.cleanup-location:hover{border-color:var(--accent)}.cleanup-location small{display:block;color:var(--dim);margin-top:2px;font-size:11px}.cleanup-location strong{font-variant-numeric:tabular-nums}.cleanup-location em{font-style:normal;color:var(--accent);font-size:11px}
   .refreshbtn{background:var(--panel);border:1px solid var(--line2);color:var(--dim);border-radius:8px;padding:6px 11px;font-size:12px;white-space:nowrap;flex:none}
@@ -338,6 +340,8 @@ const SCOPE_COPY={work:"Memory and ordinary work files.",all:"Every accessible r
 const tierOf=f=>f.visibility_tier||(f.indexed===false?"work":"memory"), isCandidate=f=>Array.isArray(f.triage)&&f.triage.length>0;
 const scopePass=f=>S.scope==="all"||(S.scope==="cleanup"?isCandidate(f):tierOf(f)!=="physical_only"), scopeFiles=()=>files.filter(scopePass);
 const triageText=f=>(f.triage||[]).map(k=>(INVENTORY.signals[k]||{}).label||k).join(" · ");
+const cleanupVisible=f=>S.scope==="cleanup" || (S.triageHighlight&&isCandidate(f));
+const cleanupColor=f=>S.scope==="cleanup" ? "var(--bad)" : dimHex(f);
 
 /* ---------- current type dimension ---------- */
 function dimValue(f){ return S.dim==="role" ? f._role : f._fmt; }
@@ -532,7 +536,7 @@ function syncConstellation(){
   if(constellationFrame&&constellationFrame.contentWindow)
     constellationFrame.contentWindow.postMessage({type:"vault-map-host-capabilities",propertiesPanel:true},"*");
   if(constellationFrame&&constellationFrame.contentWindow) constellationFrame.contentWindow.postMessage({type:"vault-map-scope",scope:S.scope},"*");
-  if(constellationFrame&&constellationFrame.contentWindow) constellationFrame.contentWindow.postMessage({type:"vault-map-triage",highlight:S.triageHighlight},"*");
+  if(constellationFrame&&constellationFrame.contentWindow) constellationFrame.contentWindow.postMessage({type:"vault-map-triage",highlight:S.scope==="cleanup"||S.triageHighlight},"*");
   sendConstellationHighlight(); sendConstellationSelection();
 }
 function renderConstellation(){
@@ -552,7 +556,7 @@ function renderTypes2(){
   const totN=list.length, totB=list.reduce((s,f)=>s+(f.bytes||0),0);
   let rows="";
   groups.forEach(g=>{
-    const col=dimHexOf(g.key);
+    const col=S.scope==="cleanup" ? "var(--bad)" : dimHexOf(g.key);
     rows+=`<div class="trow" data-type="${esc(g.key)}">`+
       `<div class="tlbl"><span class="sw" style="background:${col}"></span>${esc(dimLabel(g.key))}</div>`+
       `<div class="bars">`+
@@ -633,8 +637,8 @@ function renderSizes(){
     const fcells=squarify(fchildren,{x:gx+1,y:innerY,w:gw-2,h:innerH});
     fcells.forEach(fc=>{
       const f=fc.ref.f; if(fc.w<1||fc.h<1) return;
-      const col=dimHex(f);
-      tiles+=`<rect class="tm-tile${S.triageHighlight&&isCandidate(f)?" triage":""}" data-path="${esc(f.path)}" x="${fc.x.toFixed(1)}" y="${fc.y.toFixed(1)}" width="${Math.max(0.6,fc.w-1).toFixed(1)}" height="${Math.max(0.6,fc.h-1).toFixed(1)}" rx="1.5" fill="${col}"><title>${esc(f.path)}\n${dimLabel(dimValue(f))} · ${kb(f.bytes||0)}</title></rect>`;
+      const col=cleanupColor(f);
+      tiles+=`<rect class="tm-tile${cleanupVisible(f)?" triage":""}" data-path="${esc(f.path)}" x="${fc.x.toFixed(1)}" y="${fc.y.toFixed(1)}" width="${Math.max(0.6,fc.w-1).toFixed(1)}" height="${Math.max(0.6,fc.h-1).toFixed(1)}" rx="1.5" fill="${col}"><title>${esc(f.path)}\n${dimLabel(dimValue(f))} · ${kb(f.bytes||0)}</title></rect>`;
       if(fc.w>52 && fc.h>30){
         const nm=esc(fileName(f.path)); const clip=Math.max(3,Math.floor((fc.w-8)/5.7));
         tiles+=`<text class="tm-label" x="${(fc.x+4).toFixed(1)}" y="${(fc.y+13).toFixed(1)}">${nm.length>clip?nm.slice(0,clip)+"…":nm}</text>`;
@@ -653,9 +657,9 @@ function renderSizes(){
     }
   });
   const svg=`<svg class="viz" viewBox="0 0 ${W} ${H}">`+frames+tiles+heads+`</svg>`;
-  const legendRows=typeGroups(list).map(g=>`<div class="row"><span class="sw" style="background:${dimHexOf(g.key)}"></span>${esc(dimLabel(g.key))}</div>`).join("");
+  const legendRows=S.scope==="cleanup"?`<div class="row"><span class="sw" style="background:var(--bad)"></span>Cleanup-review candidate</div>`:typeGroups(list).map(g=>`<div class="row"><span class="sw" style="background:${dimHexOf(g.key)}"></span>${esc(dimLabel(g.key))}</div>`).join("");
   stage.innerHTML=svg+`<div class="vizlegend">${legendRows}</div>`+
-    `<div class="vizhint">Area = file size · grouped by top folder · color = ${S.dim} · hover for exact size · click to inspect</div>`;
+    `<div class="vizhint">Area = file size · grouped by top folder · color = ${S.scope==="cleanup"?"cleanup review":""+S.dim} · hover for exact size · click to inspect</div>`;
   stage.querySelectorAll(".tm-tile").forEach(r=>r.onclick=()=>selectFile(r.getAttribute("data-path")));
 }
 
@@ -689,9 +693,9 @@ function renderTable(){
   thead.appendChild(tr); t.appendChild(thead);
   const tb=el("tbody");
   list.forEach(f=>{
-    const row=el("tr"); if(S.sel&&S.sel.kind==="file"&&S.sel.ref===f.path) row.className="sel";
+    const row=el("tr"); if(S.sel&&S.sel.kind==="file"&&S.sel.ref===f.path) row.className="sel"; else if(S.scope==="cleanup") row.className="cleanup-item";
     row.innerHTML=
-      `<td><div class="fname"><span class="fdot" style="background:${dimHex(f)}"></span><span class="nm">${esc(fileName(f.path))}</span></div><div class="fpath">${esc(f.path)}</div></td>`+
+      `<td><div class="fname"><span class="fdot" style="background:${cleanupColor(f)}"></span><span class="nm">${esc(fileName(f.path))}</span>${cleanupVisible(f)?'<span class="triage-mark">⚠</span>':""}</div><div class="fpath">${esc(f.path)}</div></td>`+
       `<td style="color:var(--dim)">${esc(topKey(f.path))}</td>`+
       `<td><span class="tag" style="color:${ROLES[f._role].hex};border-color:${ROLES[f._role].hex}">${esc(ROLES[f._role].label)}</span></td>`+
       `<td style="color:var(--dim)">.${esc(f._fmt)}</td>`+

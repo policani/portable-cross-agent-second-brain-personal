@@ -1507,12 +1507,13 @@ function drawBase(alpha){
     }
     ctx.beginPath(); ctx.arc(sx,sy,r,0,2*Math.PI);
     if(dimmed) ctx.fillStyle="rgba(120,128,145,0.18)";
+    else if(mapScope==="cleanup") ctx.fillStyle="#f0714e";
     else if(roleMatch) ctx.fillStyle=highlightColor();
     else if(n.f.indexed===false) ctx.fillStyle=n.g.color+"73";
     else ctx.fillStyle=n.g.color;
     if(mode==="overview"&&(hover===n||selected===n||hit||roleMatch)){ ctx.shadowColor=roleMatch?highlightColor():n.g.color; ctx.shadowBlur=roleMatch?20:14; }
     ctx.fill(); ctx.shadowBlur=0;
-    if(triageHighlight&&isCandidate(n.f)){
+    if((triageHighlight||mapScope==="cleanup")&&isCandidate(n.f)){
       ctx.beginPath(); ctx.arc(sx,sy,r+2.5,0,2*Math.PI);
       ctx.strokeStyle="#f0714e"; ctx.lineWidth=1.5; ctx.stroke();
     }
