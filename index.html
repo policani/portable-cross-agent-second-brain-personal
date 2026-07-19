@@ -171,7 +171,7 @@
   .insp .x{float:right;color:var(--dim);cursor:pointer;font-size:15px;line-height:1}
   .chip{font-size:10px;padding:2px 8px;border-radius:12px;border:1px solid var(--line2)}
   .scopehint{margin:5px 14px 8px;color:var(--dim2);font-size:10.5px;line-height:1.35}
-  .cleanup{padding:16px 18px;max-width:1100px}.cleanup .notice{border-left:3px solid var(--accent);padding:8px 10px;background:var(--panel);color:var(--dim);font-size:12px;margin:12px 0}.cleanup .signal{display:grid;grid-template-columns:minmax(150px,1fr) 2fr 90px;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid #171e29}.cleanup .signal span{color:var(--dim);font-size:11px}.cleanup .num{text-align:right;color:var(--text)}
+  .cleanup{padding:16px 18px;max-width:1100px}.cleanup .notice{border-left:3px solid var(--accent);padding:8px 10px;background:var(--panel);color:var(--dim);font-size:12px;margin:12px 0}.cleanup .signal{display:grid;grid-template-columns:minmax(150px,1fr) 2fr 90px;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid #171e29}.cleanup .signal span{color:var(--dim);font-size:11px}.cleanup .num{text-align:right;color:var(--text)}.cleanup-locations{display:grid;gap:6px}.cleanup-location{width:100%;display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:12px;align-items:center;text-align:left;background:var(--panel);border:1px solid var(--line2);color:var(--text);border-radius:7px;padding:8px 10px}.cleanup-location:hover{border-color:var(--accent)}.cleanup-location small{display:block;color:var(--dim);margin-top:2px;font-size:11px}.cleanup-location strong{font-variant-numeric:tabular-nums}.cleanup-location em{font-style:normal;color:var(--accent);font-size:11px}
   .refreshbtn{background:var(--panel);border:1px solid var(--line2);color:var(--dim);border-radius:8px;padding:6px 11px;font-size:12px;white-space:nowrap;flex:none}
   .refreshbtn:hover{border-color:var(--accent);color:var(--text)}
   .refreshbtn:disabled{cursor:wait;opacity:.72}
@@ -376,8 +376,8 @@ const VIEWS=[
   {id:"constellation",label:"Constellation",hero:true,  filters:false, render:renderConstellation},
   {id:"types",        label:"Types",        hero:false, filters:true,  render:renderTypes},
   {id:"sizes",        label:"Sizes",        hero:false, filters:true,  render:renderSizes},
-  {id:"cleanup",      label:"Cleanup",      hero:false, filters:true,  render:renderCleanup},
-  {id:"table",        label:"Table",        hero:false, filters:true,  render:renderTable}
+  {id:"table",        label:"Table",        hero:false, filters:true,  render:renderTable},
+  {id:"cleanup",      label:"Cleanup",      hero:false, filters:true,  render:renderCleanup}
 ];
 const viewById=id=>VIEWS.find(v=>v.id===id)||VIEWS[0];
 
@@ -577,8 +577,12 @@ function renderCleanup(){
   if(!list.length){ stage.innerHTML=`<div class="empty">No cleanup-review candidates match this scope or filter.</div>`; return; }
   const by={}; list.forEach(f=>(f.triage||[]).forEach(k=>(by[k]=by[k]||[]).push(f)));
   const signals=Object.entries(by).map(([k,items])=>{ const meta=defs[k]||{}, bytes=items.reduce((s,f)=>s+f.bytes,0); return `<div class="signal"><div><b>${esc(meta.label||k)}</b><br><span>${esc(meta.level==="safe"?"Known disposable runtime cache":"Review required")}</span></div><span>${esc(meta.detail||"Conservative evidence only.")}</span><div class="num">${items.length} · ${kb(bytes)}</div></div>`; }).join("");
+  const byLocation=new Map(); list.forEach(f=>{ const location=topKey(f.path); if(!byLocation.has(location)) byLocation.set(location,[]); byLocation.get(location).push(f); });
+  const locations=[...byLocation.entries()].map(([location,items])=>({location,folder:location==="(root)"?"":location,items,bytes:items.reduce((s,f)=>s+f.bytes,0),safe:items.filter(f=>(f.triage||[]).includes("safe_runtime_cache")).length})).sort((a,b)=>b.bytes-a.bytes).slice(0,12);
+  const locationRows=locations.map(group=>`<button class="cleanup-location" data-folder="${esc(group.folder)}"><span><b>${esc(group.location)}</b><small>${group.items.length} candidates${group.safe?` · ${group.safe} known runtime-cache files`:""}</small></span><strong>${kb(group.bytes)}</strong><em>Review folder →</em></button>`).join("");
   const rows=list.slice().sort((a,b)=>b.bytes-a.bytes).slice(0,80).map(f=>`<tr><td>${esc(f.path)}</td><td>${esc(triageText(f))}</td><td class="num">${kb(f.bytes||0)}</td></tr>`).join("");
-  stage.innerHTML=`<div class="cleanup"><div><b>${list.length}</b> candidates · <b>${kb(list.reduce((s,f)=>s+f.bytes,0))}</b> represented across one or more signals.</div><div class="notice">This is a review report, not a deletion tool. Candidate sizes overlap and are not an estimate of reclaimable disk space.</div>${signals}<div class="seclabel">Largest candidates</div><table><thead><tr><th>File</th><th>Evidence</th><th class="num">Size</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  stage.innerHTML=`<div class="cleanup"><div><b>${list.length}</b> candidates across <b>${byLocation.size}</b> top-level locations · <b>${kb(list.reduce((s,f)=>s+f.bytes,0))}</b> represented across one or more signals.</div><div class="notice"><b>Start by location, not by individual file.</b> Select a folder below to review only its candidates in the Table. This report never deletes files; overlapping signal sizes are not reclaimable-space estimates.</div><div class="seclabel">Where to review first</div><div class="cleanup-locations">${locationRows}</div><div class="seclabel">Why each location appears</div>${signals}<div class="seclabel">Largest individual candidates</div><table><thead><tr><th>File</th><th>Evidence</th><th class="num">Size</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  stage.querySelectorAll(".cleanup-location").forEach(button=>button.onclick=()=>{ S.folder=button.dataset.folder||""; S.mode="table"; renderModeSeg(); renderTypeRail(); renderTree(); renderHeader(); renderCrumbs(); renderCenter(); });
 }
 /* squarified treemap (Bruls, Huizing, van Wijk) — good aspect ratios, no overlap */
 function squarify(children, rect){
