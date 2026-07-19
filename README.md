@@ -39,6 +39,13 @@ local-only helper. Its **Refresh** button rebuilds `brain-index.js` and reloads
 the same page, with a timestamp down to the second. The constellation's search
 and display controls can be tucked away with the × button and restored with ☰.
 
+The console also separates **Memory & work files**, **All files**, and
+**Cleanup candidates** in plain language, so a large physical inventory does
+not overwhelm the default map. Cleanup is a read-only storage-triage report:
+it explains evidence for known runtime caches, rebuildable dependencies, build
+output, large files, archives, and exact duplicates, but never deletes files or
+claims candidate bytes are reclaimable space.
+
 `vault-map.html` still opens directly from the folder for a standalone map. For
 the live refresh workflow, keep the minimized local server window open while you
 use the console. Nothing is uploaded and no account is required.

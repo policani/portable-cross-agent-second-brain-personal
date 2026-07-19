@@ -120,12 +120,17 @@
   <input id="search" placeholder="Search files...">
   <label>Spacing</label>
   <div class="seg" id="viewSeg">
-    <button data-v="departments" class="on">Compact</button>
-    <button data-v="folders">Spread</button>
+    <button data-v="departments" class="on">Fewer clusters</button>
+    <button data-v="folders">Separate folders</button>
+  </div>
+  <label>Show</label>
+  <div class="seg" id="scopeSeg">
+    <button data-s="work" class="on">Memory &amp; work</button>
+    <button data-s="all">All files</button>
+    <button data-s="cleanup">Cleanup</button>
   </div>
   <label class="chk"><input type="checkbox" id="names"> File names</label>
   <label class="chk"><input type="checkbox" id="links" checked> Filaments</label>
-  <label class="chk"><input type="checkbox" id="censusToggle" checked> All workspace files</label>
   <div id="legend"></div>
 </div>
 <button id="hudToggle" type="button" aria-controls="hud" aria-expanded="true" title="Hide search and display controls">×</button>
@@ -170,7 +175,7 @@ const AGENT_COLORS=[cssv("--agentA"),cssv("--agentB"),cssv("--agentC")];
 const INSTRUCTION_NAMES=new Set(["claude.md","agents.md"]);
 
 /* ---------- data ---------- */
-let viewMode = "departments", showCensus = true;
+let viewMode = "departments", mapScope = "work", triageHighlight = false;
 let nodes=[], groups=[], links=[], ringNodes=[], folderNodes=[];
 let mode="overview";           // overview | spot
 let spot=null;                 // {center, items:Map(target->rel), edges:[...]}
@@ -199,6 +204,14 @@ function roleOf(f){
   if(/(^|\/)templates(\/|$)/.test(p)||/_template\.md$|-template\.md$/.test(name)) return "template";
   if(["agents.md","claude.md","skill.md"].includes(name)||/(^|\/)(chatgpt-project|workflow|skills)(\/|$)/.test(p)||/(trigger[-_]map|operating[-_]model|handoff[-_]rules|guardrail|runtime|start[-_]here|_prompt\.md$|[-_]prompts?\.md$|routing[-_]rules)/.test(name)) return "logic";
   return "reference";
+}
+function tierOf(f){ return f.visibility_tier||(f.indexed===false?"work":"memory"); }
+function isCandidate(f){ return Array.isArray(f.triage)&&f.triage.length>0; }
+function scopePass(f){ return mapScope==="all" || (mapScope==="cleanup" ? isCandidate(f) : tierOf(f)!=="physical_only"); }
+function syncScopeButtons(){ document.querySelectorAll("#scopeSeg button").forEach(button=>button.classList.toggle("on",button.dataset.s===mapScope)); }
+function updateScopeSubtitle(){
+  const visible=IX.files.filter(scopePass), label=mapScope==="work"?"memory & work":mapScope==="all"?"all files":"cleanup candidates";
+  document.getElementById("sub").textContent=IX.root_name+" · "+visible.length+" of "+IX.files.length+" files · "+label;
 }
 function highlightKey(f){ return highlightDimension==="format" ? extOf(f.path) : roleOf(f); }
 function highlightColor(){
@@ -892,7 +905,8 @@ function folderBounds(folder,useTargets=false){
 }
 
 function buildGraph(){
-  const visible = IX.files.filter(f=> showCensus || f.indexed!==false);
+  const visible = IX.files.filter(scopePass);
+  updateScopeSubtitle();
   selectedFolder=null; selectedFile=null; focusedRing=null; spotReturnView=null; selected=null;
   buildTree(visible);
   assignFolderColors();
@@ -1498,6 +1512,10 @@ function drawBase(alpha){
     else ctx.fillStyle=n.g.color;
     if(mode==="overview"&&(hover===n||selected===n||hit||roleMatch)){ ctx.shadowColor=roleMatch?highlightColor():n.g.color; ctx.shadowBlur=roleMatch?20:14; }
     ctx.fill(); ctx.shadowBlur=0;
+    if(triageHighlight&&isCandidate(n.f)){
+      ctx.beginPath(); ctx.arc(sx,sy,r+2.5,0,2*Math.PI);
+      ctx.strokeStyle="#f0714e"; ctx.lineWidth=1.5; ctx.stroke();
+    }
     if(n.instruction){
       ctx.beginPath(); ctx.arc(sx,sy,r+3,0,2*Math.PI);
       ctx.strokeStyle=ACCENT; ctx.lineWidth=1.2; ctx.stroke();
@@ -1889,8 +1907,10 @@ document.getElementById("viewSeg").addEventListener("click", e=>{
 });
 document.getElementById("names").addEventListener("change", requestDraw);
 document.getElementById("links").addEventListener("change", requestDraw);
-document.getElementById("censusToggle").addEventListener("change", e=>{
-  showCensus=e.target.checked;
+document.getElementById("scopeSeg").addEventListener("click", e=>{
+  const button=e.target&&e.target.closest?e.target.closest("button"):null;
+  if(!button||button.dataset.s===mapScope) return;
+  mapScope=button.dataset.s; syncScopeButtons();
   if(mode==="spot") exitSpot();
   buildGraph(); setHighlight(highlightDimension,highlightValue); requestDraw();
 });
@@ -1898,6 +1918,11 @@ addEventListener("message",e=>{
   const d=e.data;
   if(d&&d.type==="vault-map-host-capabilities") parentPropertiesPanel=!!d.propertiesPanel;
   if(d&&d.type==="vault-map-highlight") setHighlight(d.dimension,d.value);
+  if(d&&d.type==="vault-map-scope"&&["work","all","cleanup"].includes(d.scope)){
+    mapScope=d.scope; syncScopeButtons(); if(mode==="spot") exitSpot();
+    buildGraph(); setHighlight(highlightDimension,highlightValue); requestDraw();
+  }
+  if(d&&d.type==="vault-map-triage"){ triageHighlight=!!d.highlight; requestDraw(); }
   if(d&&d.type==="vault-map-selection") applyExternalSelection(d.selection||null);
 });
 
